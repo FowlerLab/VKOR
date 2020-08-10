@@ -1,0 +1,141 @@
+---
+title: "VKOR_assay_analysis_for_submission"
+author: "Melissa Chiasson"
+date: "12/9/2019"
+output: html_document
+---
+
+# Analysis setup
+This R markdown file will go through the processes of analyzing the data for the VKOR manuscript, using 2 files as the starting point. These files are the VKOR variant abundance and activity score data tables, as well as the VKOR and TPMT positional score data tables. These files were provided as supplementary data files from the journal, and can also be obtained at our GitHub repo. Please place these files in the same directory as this R Markdown file to allow the analyses to proceed.  
+  
+Furthermore, create a directory titled "Output" in the same directory as this R Markdown file to create the graphics files used to generate the figures.  
+```{r Get everything from the four supplementary tables}
+knitr::opts_chunk$set(echo = TRUE)
+rm(list = ls())
+graphics.off()
+markdown_directory <- getwd()
+set.seed(12345)
+
+vkor_variants <- read.table(file = "*Insert the name of the VKOR variant data file here*", stringsAsFactors = FALSE, sep = "\t", header = TRUE)
+vkor_positions <- read.table(file = "*Insert the name of the VKOR positional data file here*", stringsAsFactors = FALSE, sep = "\t", header = TRUE)
+```
+  
+Also, load the necessary packages, and set up the default theme that will be used in all plots  
+```{r Load packages, warning = FALSE}
+if(!require(ggplot2)){install.packages("ggplot2")}
+library(ggplot2)
+
+if(!require(ggdendro)){install.packages("ggdendro")}
+library(ggdendro)
+
+if(!require(plyr)){install.packages("plyr")}
+library(plyr)
+
+if(!require(dplyr)){install.packages("dplyr")}
+library(dplyr)
+
+if(!require(tidyr)){install.packages("tidyr")}
+library(tidyr)
+
+if(!require(reshape)){install.packages("reshape")}
+library(reshape)
+
+if(!require(data.table)){install.packages("data.table")}
+library(data.table)
+
+if(!require(scales)){install.packages("scales")}
+library(scales)
+
+if(!require(GGally)){install.packages("GGally")}
+library(GGally)
+
+if(!require(waffle)){install.packages("waffle")}
+library(waffle)
+
+if(!require(grid)){install.packages("grid")}
+library(grid)
+
+if(!require(MASS)){install.packages("MASS")}
+library(MASS)
+
+if(!require(mixtools)){install.packages("mixtools")}
+library(mixtools)
+
+if(!require(zoo)){install.packages("zoo")}
+library(zoo)
+
+if(!require(ggrepel)){install.packages("ggrepel")}
+library(ggrepel)
+
+if(!require(dendextend)){install.packages("dendextend")}
+library(dendextend)
+
+if(!require(devtools)){install.packages("devtools")}
+library(devtools)
+
+install_github("hrbrmstr/waffle")
+
+## The package versions used by the author
+packageVersion("ggplot2") #‘2.2.1.9000’
+packageVersion("plyr") #‘1.8.4’
+packageVersion("dplyr") 
+packageVersion("reshape") #‘0.8.6’
+packageVersion("data.table") #‘1.9.8’
+packageVersion("scales") #‘0.4.1’
+packageVersion("GGally") #‘1.3.0’
+packageVersion("waffle") #‘0.7.0’
+packageVersion("ggdendro") #‘0.1.20’
+packageVersion("grid") #‘3.2.4’
+packageVersion("MASS") #‘7.3.45’
+packageVersion("mixtools") 
+packageVersion("zoo") 
+packageVersion("ggrepel") 
+packageVersion("dendextend") 
+packageVersion("devtools") 
+packageVersion("waffle") 
+
+theme_new <- theme_set(theme_bw())
+# Original theme (has gridlines)
+theme_new <- theme_update(panel.grid.major = element_line(colour = "grey85"),panel.grid.minor = element_line(colour = "grey98"))
+```
+
+Here, we are also changing the factor levels of the amino acids to reflect a more informative order:  
+```{r Changing the default factor levels for amino acids}
+pten_positions$start <- factor(pten_positions$start, levels = c("A","V","I","L","M","F","Y","W","S","T","N","Q","C","G","P","R","H","K","D","E","X"))
+pten_variants$start <- factor(pten_variants$start, levels = c("A","V","I","L","M","F","Y","W","S","T","N","Q","C","G","P","R","H","K","D","E","X"))
+pten_variants$end <- factor(pten_variants$end, levels = c("A","V","I","L","M","F","Y","W","S","T","N","Q","C","G","P","R","H","K","D","E","X"))
+
+tpmt_positions$start <- factor(tpmt_positions$start, levels = c("A","V","I","L","M","F","Y","W","S","T","N","Q","C","G","P","R","H","K","D","E","X"))
+tpmt_variants$start <- factor(tpmt_variants$start, levels = c("A","V","I","L","M","F","Y","W","S","T","N","Q","C","G","P","R","H","K","D","E","X"))
+tpmt_variants$end <- factor(tpmt_variants$end, levels = c("A","V","I","L","M","F","Y","W","S","T","N","Q","C","G","P","R","H","K","D","E","X"))
+```
+
+Here are some basic stats on the abundance classes for the VKOR datatables we just imported:
+```{r PTEN basic stats, echo = FALSE}
+paste("We quantified the abundance of", nrow(subset(vkor_variants, class == "missense" & !is.na(score))), "variants of the pharmacogene, VKOR")
+paste("Furthermore, we identified", nrow(subset(vkor_variants, class == "missense" & abundance_class == "low" & !is.na(score))), "low-abundance VKOR variants that could be pathogenic and", nrow(subset(vkor_variants, class == "missense" & activity_class == "low" & !is.na(score))), "low-abundance VKOR variants that could alter drug response")
+
+paste("There are ",nrow(subset(vkor_variants, class == "synonymous" & !is.na(score))), " synonymous VKOR variants with abundance scores",sep="")
+paste("There are ",nrow(subset(vkor_variants, class == "nonsense" & !is.na(score))), " nonsense VKOR variants with abundance scores",sep="")
+paste("There are ",nrow(subset(vkor_variants, class == "missense" & !is.na(score))), " single amino acid VKOR variants with abundance scores",sep="")
+```
+  
+# Initial analyses: VAMP-seq assay performance
+
+To validate that we observe different EGFP:mCherry ratios depending on the fused variant, we used EGFP with WT or uknown unstable variants, as well as numerous randomly picked variants expected to span the range of the ratio. The geometric mean of the distribution of ratios for each variant was used for the comparison.
+
+Comparison of PTEN VAMP-seq scores with individually assessed EGFP:mCherry variants (WT-normalized geometric means plotted)  
+```{r pten_individual graph}
+pten_variants_individual <- subset(pten_variants, !is.na(egfp_geomean))
+pten_stability_control_variants <- c("WT","Y68H","C136R","D252G","L345Q","C124S")
+pten_variants_individual$variant <- factor(pten_variants_individual$variant, levels = c(pten_stability_control_variants,pten_variants_individual$variant[!(pten_variants_individual$variant %in% pten_stability_control_variants)]))
+
+PTEN_individual_plot <- ggplot() + geom_errorbar(data = pten_variants_individual, aes(x = variant, ymin = egfp_geomean_lower_ci, ymax = egfp_geomean_upper_ci), color = "black") +
+  geom_point(data = pten_variants_individual, aes(x = variant, y = egfp_geomean), color = "black", size = 2) + 
+  geom_point(data = pten_variants_individual, aes(x = variant, y = egfp_geomean), color = "red", size = 1) + 
+  scale_y_continuous(breaks = c(0,0.25,0.5,0.75,1,1.25,1.5)) + theme(axis.text.x = element_text(angle = -90, vjust = 0.5, hjust = 0)) +
+  xlab(NULL) + ylab("Mean WT-normalized\nEGFP / mCherry ratio")
+ggsave(file = "Output/PTEN_individual_plot.pdf", PTEN_individual_plot, height = 3, width = 5)
+PTEN_individual_plot
+```
+  
