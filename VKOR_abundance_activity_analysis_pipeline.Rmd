@@ -1,0 +1,1348 @@
+---
+title: "VKOR_abundance_activity_analysis_pipeline"
+author: "Melissa Chiasson"
+date: "5/8/2020"
+output: html_document
+---
+# Analysis setup
+This R markdown file will go through the processes of analyzing the data for the manuscript, "Multiplexed measurement of variant abundance and activity reveals VKOR topology, active site and human variant impact," using the supplemental data file containing variant abundance and activity scores as the starting point. These files are provided as supplementary data files from the journal, and can also be obtained at our GitHub repo. Please place these files in the same directory as this R Markdown file to allow the analyses to proceed.  
+  
+Furthermore, create a directory titled "Output" in the same directory as this R Markdown file to create the graphics files used to generate the figures. 
+
+## Initial setup (load packages, create default theme)
+```{r setup, include=FALSE}
+knitr::opts_chunk$set(echo = TRUE)
+rm(list = ls())
+graphics.off()
+markdown_directory <- getwd()
+```
+
+## Install and/or load required packages
+```{r Load packages, warning = FALSE}
+if(!require(ggplot2)){install.packages("ggplot2")}
+library(ggplot2)
+
+if(!require(ggdendro)){install.packages("ggdendro")}
+library(ggdendro)
+
+if(!require(plyr)){install.packages("plyr")}
+library(plyr)
+
+if(!require(dplyr)){install.packages("dplyr")}
+library(dplyr)
+
+if(!require(tidyr)){install.packages("tidyr")}
+library(tidyr)
+
+if(!require(reshape)){install.packages("reshape")}
+library(reshape)
+
+if(!require(data.table)){install.packages("data.table")}
+library(data.table)
+
+if(!require(scales)){install.packages("scales")}
+library(scales)
+
+if(!require(GGally)){install.packages("GGally")}
+library(GGally)
+
+if(!require(grid)){install.packages("grid")}
+library(grid)
+
+if(!require(MASS)){install.packages("MASS")}
+library(MASS)
+
+if(!require(mixtools)){install.packages("mixtools")}
+library(mixtools)
+
+if(!require(zoo)){install.packages("zoo")}
+library(zoo)
+
+if(!require(ggrepel)){install.packages("ggrepel")}
+library(ggrepel)
+
+if(!require(dendextend)){install.packages("dendextend")}
+library(dendextend)
+
+if(!require(devtools)){install.packages("devtools")}
+library(devtools)
+
+if(!require(VennDiagram)){install.packages("VennDiagram")}
+library(VennDiagram)
+
+## The package versions used by the author
+packageVersion("ggplot2") #‘3.2.1’
+packageVersion("plyr") #‘1.8.4’
+packageVersion("dplyr") #‘0.8.1’
+packageVersion("reshape") #‘0.8.8’
+packageVersion("data.table") #‘1.12.2’
+packageVersion("scales") #‘1.1.0’
+packageVersion("GGally") #‘1.4.0’
+packageVersion("ggdendro") #‘0.1.20’
+packageVersion("grid") #‘3.5.2’
+packageVersion("MASS") #‘7.3.51.4’
+packageVersion("mixtools") #‘1.1.0’'
+packageVersion("zoo") #‘1.8.6’
+packageVersion("ggrepel") #‘0.8.1’
+packageVersion("dendextend") #‘1.12.0’
+packageVersion("devtools") #‘2.2.1’
+packageVersion("VennDiagram") #‘1.6.20’
+```
+
+Create custom functions
+```{r Create custom functions}
+to_single_notation <- function(arg1){
+if(toupper(arg1) == "ALA"){return("A")}
+if(toupper(arg1) == "CYS"){return("C")}
+if(toupper(arg1) == "ASP"){return("D")}
+if(toupper(arg1) == "GLU"){return("E")}
+if(toupper(arg1) == "PHE"){return("F")}
+if(toupper(arg1) == "GLY"){return("G")}
+if(toupper(arg1) == "HIS"){return("H")}
+if(toupper(arg1) == "ILE"){return("I")}
+if(toupper(arg1) == "LYS"){return("K")}
+if(toupper(arg1) == "LEU"){return("L")}
+if(toupper(arg1) == "MET"){return("M")}
+if(toupper(arg1) == "ASN"){return("N")}
+if(toupper(arg1) == "PRO"){return("P")}
+if(toupper(arg1) == "GLN"){return("Q")}
+if(toupper(arg1) == "ARG"){return("R")}
+if(toupper(arg1) == "SER"){return("S")}
+if(toupper(arg1) == "THR"){return("T")}
+if(toupper(arg1) == "VAL"){return("V")}
+if(toupper(arg1) == "TRP"){return("W")}
+if(toupper(arg1) == "TYR"){return("Y")}
+if(toupper(arg1) == "TER"){return("X")}
+}
+
+amino_acid_class <- function(input_frame){
+if(input_frame[x,"end"] %in% c("D","E")){input_frame[x,"end_class"] <- "Acidic"}
+if(input_frame[x,"end"] %in% c("H","K","R")){input_frame[x,"end_class"] <- "Basic"}
+if(input_frame[x,"end"] %in% c("S","T","N","Q")){input_frame[x,"end_class"] <- "Hydrophilic uncharged"}
+if(input_frame[x,"end"] %in% c("G","A","V","I","L")){input_frame[x,"end_class"] <- "Aliphatic uncharged"}
+if(input_frame[x,"end"] %in% c("C","M","P")){input_frame[x,"end_class"] <- "Nonpolar uncharged"}
+if(input_frame[x,"end"] %in% c("F","Y","W")){input_frame[x,"end_class"] <- "Aromatic"}
+}
+
+to_max_asa <- function(arg1){
+if(toupper(arg1) == "A"){return(113)}
+if(toupper(arg1) == "C"){return(140)}
+if(toupper(arg1) == "D"){return(151)}
+if(toupper(arg1) == "E"){return(183)}
+if(toupper(arg1) == "F"){return(218)}
+if(toupper(arg1) == "G"){return(85)}
+if(toupper(arg1) == "H"){return(194)}
+if(toupper(arg1) == "I"){return(182)}
+if(toupper(arg1) == "K"){return(211)}
+if(toupper(arg1) == "L"){return(180)}
+if(toupper(arg1) == "M"){return(204)}
+if(toupper(arg1) == "N"){return(158)}
+if(toupper(arg1) == "P"){return(143)}
+if(toupper(arg1) == "Q"){return(189)}
+if(toupper(arg1) == "R"){return(241)}
+if(toupper(arg1) == "S"){return(122)}
+if(toupper(arg1) == "T"){return(146)}
+if(toupper(arg1) == "V"){return(160)}
+if(toupper(arg1) == "W"){return(259)}
+if(toupper(arg1) == "Y"){return(229)}
+}
+```
+
+#Create universal changes to the baseline ggplot2 theme
+```{r ggplot2 theme changes}
+theme_new <- theme_set(theme_classic())
+```
+
+```{r}
+vkor_variants<-read.csv("vkor_abundance_activity_scores_variants.csv",header=TRUE)
+vkor_positions<-read.csv("vkor_abundance_activity_scores_positions.csv",header=TRUE)
+#vkor_variants <- read.csv(file = "*Insert the name of the VKOR variant data file here*", header = TRUE)
+#vkor_positions <- read.csv(file = "*Insert the name of the VKOR positional data file here*", header = TRUE)
+
+```
+
+
+####Summary data stats of VKOR scores
+```{r}
+paste("There are ",nrow(subset(vkor_variants, class == "synonymous" & !is.na(abundance_score))), " synonymous VKOR variants with abundance scores",sep="")
+paste("There are ",nrow(subset(vkor_variants, class == "nonsense" & !is.na(abundance_score))), " nonsense VKOR variants with abundance scores",sep="")
+paste("There are ",nrow(subset(vkor_variants, class == "missense" & !is.na(abundance_score))), " single amino acid VKOR variants with abundance scores",sep="")
+paste("There are ",nrow(subset(vkor_variants, class == "missense" & !is.na(abundance_score) & abundance_class == "low")), " single amino acid VKOR variants with low abundance scores",sep="")
+paste("There are ",nrow(subset(vkor_variants, !is.na(abundance_score) & abundance_class == "low")), " VKOR variants with low abundance scores",sep="")
+
+paste("There are ",nrow(subset(vkor_variants, class == "synonymous" & !is.na(activity_score))), " synonymous VKOR variants with activity scores",sep="")
+paste("There are ",nrow(subset(vkor_variants, class == "nonsense" & !is.na(activity_score))), " nonsense VKOR variants with activity scores",sep="")
+paste("There are ",nrow(subset(vkor_variants, class == "missense" & !is.na(activity_score))), " single amino acid VKOR variants with activity scores",sep="")
+paste("There are ",nrow(subset(vkor_variants, class == "missense" & !is.na(activity_score) & activity_class == "low")), " single amino acid VKOR variants with low activity scores",sep="")
+paste("There are ",nrow(subset(vkor_variants, !is.na(activity_score) & activity_class == "low")), " VKOR variants with low activity scores",sep="")
+```
+
+## Defining some useful boundaries for analysis and plotting
+```{r Set useful boundaries for abundance plotting}
+vkor_synonymous_5th_abundance <- quantile(subset(vkor_variants, class == "synonymous")$abundance_score, 0.05,na.rm = TRUE)
+vkor_lower_bound_abundance <- as.numeric(quantile(subset(vkor_variants, class == "missense")$abundance_score, 0.1, na.rm = TRUE))
+vkor_upper_bound_abundance <- median(subset(vkor_variants, class == "synonymous")$abundance_score,na.rm = TRUE)
+
+vkor_synonymous_5th_activity <- quantile(subset(vkor_variants, class == "synonymous")$activity_score, 0.05, na.rm = TRUE)
+vkor_lower_bound_activity <- as.numeric(quantile(subset(vkor_variants, class == "missense")$activity_score, 0.1, na.rm = TRUE))
+vkor_upper_bound_activity <- median(subset(vkor_variants, class == "synonymous")$activity_score, na.rm = TRUE)
+```
+
+#### Plots of nonsense variant scores by position
+```{r Nonsense mutations by position, fig.height = 1.5, fig.width = 2.75, warning = FALSE}
+#Abundance score
+vkor_trunc_score_position_plot_abundance <- ggplot(data = subset(vkor_variants, class == "nonsense"), aes(x = as.numeric(position), y = abundance_score)) + geom_point(size = 0.5) + 
+ylab("Abundance score") + xlab("Position in protein") + geom_hline(yintercept = vkor_variants[vkor_variants$class == "wt","abundance_score"], color = "blue") + 
+scale_y_continuous(limits = c(-0.5,1.3), breaks = c(-0.4,0,0.4,0.8,1.2)) + scale_x_continuous(breaks = c(0,100,200,300,400))
+plot(vkor_trunc_score_position_plot_abundance)
+ggsave(file = "Output/vkor_abundance_trunc_score_position_plot.pdf", vkor_trunc_score_position_plot_abundance, height = 1.5, width = 2.25)
+
+#Activity score
+vkor_trunc_score_position_plot_activity <- ggplot(data = subset(vkor_variants, class == "nonsense"), aes(x = as.numeric(position), y = activity_score)) + geom_point(size = 0.5) + 
+ylab("Activity score") + xlab("Position in protein") + geom_hline(yintercept = vkor_variants[vkor_variants$class == "wt","activity_score"], color = "blue") + 
+scale_y_continuous(limits = c(-0.5,1.3), breaks = c(-0.4,0,0.4,0.8,1.2)) + scale_x_continuous(breaks = c(0,100,200,300,400))
+plot(vkor_trunc_score_position_plot_activity)
+ggsave(file = "Output/vkor_activity_trunc_score_position_plot.pdf", vkor_trunc_score_position_plot_activity, height = 1.5, width = 2.25)
+```
+
+
+#### Figure 1c: Make a VKOR density plot that also serves as the heatmap legend for abundance data
+```{r VKOR density plot, fig.height = 3.5, fig.width = 6, warning = FALSE}
+vkor_m <- ggplot(data = subset(vkor_variants, class == "missense"), aes(x = abundance_score, y = ..scaled..))
+vkor_m <- vkor_m + geom_density()
+vkor_q <- ggplot_build(vkor_m)$data[[1]]
+vkor_q_low <- subset(vkor_q, x <= vkor_lower_bound_abundance)
+vkor_q_mid <- subset(vkor_q, x > vkor_lower_bound_abundance & x < vkor_upper_bound_abundance)
+vkor_q_high <- subset(vkor_q, x >= vkor_upper_bound_abundance)
+
+vkor_heatmap_density_abundance <- ggplot() + 
+geom_segment(data = vkor_q_low , aes(x = x, y = y, xend = x, yend = 0), colour = "blue", size = 2) +
+geom_segment(data = vkor_q_mid, aes(x = x, y = y, xend = x, yend = 0, colour = x), size = 2) +
+geom_segment(data = vkor_q_high, aes(x = x, y = y, xend = x, yend = 0, colour = x), size = 2) +
+geom_density(data = subset(vkor_variants, class == "missense"), aes(x = abundance_score, y = ..scaled..), size = 1) + 
+scale_color_gradientn(colours = c("blue","white","red"), values = rescale(c(vkor_lower_bound_abundance,vkor_upper_bound_abundance,2)), limits=c(vkor_lower_bound_abundance,2)) + 
+scale_x_continuous(limits = c(-0.8, 2), breaks = seq(-0.4,2,0.4), expand = c(0,0)) +
+scale_y_continuous(limits = c(0,1.2), breaks = c(0,0.4,0.8,1.2), expand = c(0,0.002)) + xlab("Variant abundance") + ylab("Density") +
+theme_classic()+theme(axis.text.x =element_text(size=10,color="black"),
+        axis.text.y=element_text(size=10,color="black"),
+        axis.title=element_text(size=12,color="black"), 
+        panel.background = element_rect(fill = "white"), 
+        legend.position = "none", 
+        axis.line = element_line(colour = "black")) +
+geom_density(data = subset(vkor_variants, class == "synonymous"), aes(x = abundance_score, y = ..scaled..), color = "darkred", alpha = 0.4, size = 1, linetype = 2) +
+geom_density(data = subset(vkor_variants, class == "nonsense" & position > 10 & position < 153), aes(x = abundance_score, y = ..scaled..), color = "darkblue", alpha = 0.4, size = 1, linetype = 2)
+plot(vkor_heatmap_density_abundance)
+ggsave(file = "Output/vkor_heatmap_density_abundance.pdf", vkor_heatmap_density_abundance, height = 2, width = 4)
+
+```
+
+#### Figure 1d: Heatmap in vertical orientation for abundance (x=position, y = AA) 
+```{r Big VKOR summary heatmap, echo=FALSE, fig.height = 6, fig.width =9}
+wtseq <- "MGSTWGSPGWVRLALCLTGLVLSLYALHVKAARARDRDYRALCDVGTAISCSRVFSSRWGRGFGLVEHVLGQDSILNQSNSIFGCIFYTLQLLLGCLRTRWASVLMLLSSLVSLAGSVYLAWILFFVLYDFCIVCITTYAINVSLMWLSFRKVQEPQGKAKRH"
+wtseqframe <- data.frame(seq(1,nchar(wtseq)))
+wtseqframe$end <- rep("NA",nchar(wtseq))
+for (x in 1:nchar(wtseq)){wtseqframe$end[x] <- substr(wtseq,x,x)}
+wtseqframe$abundance_score <- vkor_variants[vkor_variants$class == "wt","abundance_score"]
+colnames(wtseqframe) <- c("position","end","abundance_score")
+
+position_vector <- seq(1:nchar(wtseq))
+aa_vector <- c("A","V","I","L","M","F","Y","W","S","T","N","Q","C","G","P","R","H","K","D","E","X")
+full_combinations <- as.vector(outer(position_vector, aa_vector, paste, sep=""))
+missing_combinations <- data.frame(full_combinations[!(full_combinations %in% substr(subset(vkor_variants, !is.na(abundance_score))$variant,2,10))]); colnames(missing_combinations) <- "variant"
+missing_combinations$position <- gsub("[^0-9]","",missing_combinations$variant); missing_combinations$position <- as.numeric(missing_combinations$position)
+missing_combinations$end <- gsub("[0-9]","",missing_combinations$variant); missing_combinations$end <- factor(missing_combinations$end, levels = c("A","V","I","L","M","F","Y","W","S","T","N","Q","C","G","P","R","H","K","D","E","X"))
+
+vkor_full_variant_heatmap <- ggplot() +
+geom_tile(data = missing_combinations, aes(x = end, y = position), fill = "grey70") +
+geom_tile(data = subset(vkor_variants, (class == "missense" | class == "nonsense") & abundance_score > vkor_lower_bound_abundance & abundance_score < vkor_upper_bound_abundance), aes(x = end, y = position, fill = abundance_score)) +
+geom_tile(data = subset(vkor_variants, (class == "missense" | class == "nonsense") & abundance_score >= vkor_upper_bound_abundance), aes(x = end, y = position, fill = abundance_score)) +
+geom_tile(data = subset(vkor_variants, (class == "missense" | class == "nonsense") & abundance_score <= vkor_lower_bound_abundance), aes(x = end, y = position), fill = "blue") +
+geom_tile(data = wtseqframe, aes(x = end, y= position, fill = abundance_score)) +
+geom_point(data = wtseqframe, aes(x = end, y = position), shape = 15, size = 0.4) + scale_y_reverse(expand = c(0,0),lim=c(163,0), breaks = c(seq(0,163,10)))+
+scale_fill_gradientn(colours = c("blue","white","red"), values = rescale(c(vkor_lower_bound_abundance,vkor_upper_bound_abundance,2)), limits=c(vkor_lower_bound_abundance,2)) + 
+theme(panel.background = element_rect(fill = "white"),
+        panel.grid.major = element_line(colour = "grey90"),
+        axis.text.x =element_text(size=10,color="black", hjust=0.5),
+        axis.text.y=element_text(size=10,color="black",hjust=0.95),
+        axis.title=element_text(size=12,color="black"), 
+        legend.title = element_blank(),
+        legend.text = element_text(size = 10,color="black"),
+        legend.position="top",
+        legend.key.width=unit(1.3,"cm"),
+        legend.key.height = unit(0.5,"cm"))+xlab("Amino acid")+ylab("Position")+labs(fill = "Abundance score")
+plot(vkor_full_variant_heatmap)
+ggsave(file = "Output/VKOR_full_variant_abundance_heatmap.pdf", vkor_full_variant_heatmap, height = 6, width = 3.25)
+
+```
+
+
+#### Figure 1e: Graph number of variants we see at each position in abundance and activity data
+```{r fig.height=2,fig.width=7.25}
+vkor_variants_scored_plot_abundance<-ggplot(vkor_positions,aes(x=position,y=variants_scored_abundance))+geom_bar(stat="identity")+ scale_x_continuous(expand = c(0,0.05), lim=c(0,163),breaks = c(0, seq(0,163,10)))+scale_y_continuous(breaks = c(1,10,19),position="right") + xlab("Position") + ylab("Variants scored") +theme_classic()+theme(axis.text.x=element_text(size=10,color="black",angle = 90,hjust=0.95,vjust=0.5),axis.text.y=element_text(size=10,color="black"),axis.title.x=element_text(size=12),axis.title.y=element_text(size=12))
+plot(vkor_variants_scored_plot_abundance)
+ggsave(file = "Output/vkor_positions_variants_scored_graph_abundance.pdf", vkor_variants_scored_plot_abundance, height = 1, width = 5.35)
+```
+
+#### Figure 1f: how do monoclonal sample median ratio scores compare to VAMP-seq scores, as well as Western Blot intensities
+```{r fig.height=6,fig.width=7.25}
+clonal_validation_data<-read.csv("VAMP-Seq_validation_clones_flow_data.csv",header=TRUE)
+
+cor(clonal_validation_data$score,clonal_validation_data$mean_ratio,method="pearson")
+cor(clonal_validation_data$score,clonal_validation_data$mean_ratio,method="spearman")
+
+clonal_validation_plot<-ggplot(clonal_validation_data,aes(x=score,y=mean_ratio))+geom_point()+geom_errorbar(aes(ymin=mean_ratio-se,ymax=mean_ratio+se))+geom_errorbarh(aes(xmin=score-score_se, xmax=score+score_se))+annotate("text", x = clonal_validation_data$score, y = clonal_validation_data$mean_ratio+0.16, label = clonal_validation_data$variant,size=2) +
+xlab("Abundance score") + ylab("eGFP:mCherry ratio")+theme(axis.text=element_text(size=10,color="black"),axis.title=element_text(size=12))
+plot(clonal_validation_plot)
+ggsave(file="Output/monoclonal_vampseq_validation_dot_plot.pdf",clonal_validation_plot,height=2,width=4)
+
+##Put Western Blot data quantification values here and compare to VAMP-seq score
+
+```
+
+#### Figure 2e: Make a VKOR density plot for activity data
+```{r fig.height=8,fig.width=12}
+vkor_m <- ggplot(data = subset(vkor_variants, class == "missense"), aes(x = activity_score, y = ..scaled..))
+vkor_m <- vkor_m + geom_density()
+vkor_q <- ggplot_build(vkor_m)$data[[1]]
+vkor_q_low <- subset(vkor_q, x <= vkor_lower_bound_activity)
+vkor_q_mid <- subset(vkor_q, x > vkor_lower_bound_activity & x < vkor_upper_bound_activity)
+vkor_q_high <- subset(vkor_q, x >= vkor_upper_bound_activity)
+
+vkor_heatmap_density_activity <- ggplot() + 
+geom_segment(data = vkor_q_low , aes(x = x, y = y, xend = x, yend = 0), colour = "blue", size = 2) +
+geom_segment(data = vkor_q_mid, aes(x = x, y = y, xend = x, yend = 0, colour = x), size = 2) +
+geom_segment(data = vkor_q_high, aes(x = x, y = y, xend = x, yend = 0, colour = x), size = 2) +
+geom_density(data = subset(vkor_variants, class == "missense"), aes(x = activity_score, y = ..scaled..), size = 1) + 
+scale_color_gradientn(colours = c("blue","white","red"), values = rescale(c(vkor_lower_bound_activity,vkor_upper_bound_activity,2)), limits=c(vkor_lower_bound_activity,2)) + 
+scale_x_continuous(limits = c(-0.8, 1.4), breaks = seq(-0.4,1.4,0.4), expand = c(0,0)) +
+scale_y_continuous(limits = c(0,1.2), breaks = c(0,0.4,0.8,1.2), expand = c(0,0.002)) + xlab("Variant activity score") + ylab("Density") +
+  theme(panel.background = element_rect(fill = "white"), 
+        legend.position = "none", 
+        panel.grid.minor = element_blank(),
+        axis.text.x =element_text(size=10,color="black"),
+        axis.text.y=element_text(size=10,color="black"),
+        axis.title=element_text(size=12,color="black")) +
+geom_density(data = subset(vkor_variants, class == "synonymous"), aes(x = activity_score, y = ..scaled..), color = "darkred", alpha = 0.4, size = 1, linetype = 2) +
+geom_density(data = subset(vkor_variants, class == "nonsense" & position < 142), aes(x = activity_score, y = ..scaled..), color = "darkblue", alpha = 0.4, size = 1, linetype = 2)
+plot(vkor_heatmap_density_activity)
+ggsave(file = "Output/vkor_heatmap_density_activity.pdf", vkor_heatmap_density_activity, height = 2.5, width = 4)
+
+
+```
+
+#### Figure 3a: Domain architecture models for VKOR topology
+```{r Making a graph of the domain architecture, fig.width = 8, fig.height = 0.75}
+#4 TMD coordinates below are from Li et al. Nature 2010 paper: https://www.nature.com/articles/nature08720
+#TMD1: 12-36
+#TMD2: 79-97
+#TMD3: 100-127
+#TMD4: 132-151
+
+#3 TMD coordinates below are from Tie et al. JBC 2012: http://www.jbc.org/content/287/41/33945
+#TMD1: 12-36
+#TMD2: 79-97
+#TMD3: 100-127
+
+vkor_architecture_schematic_4TM <- ggplot() + 
+geom_rect(aes(xmin = 5, xmax = 12, ymin = 0, ymax = 5), color = NA, fill = "grey80", alpha = 0.5) +
+geom_rect(aes(xmin = 12, xmax = 36, ymin = 0, ymax = 5), color = "grey20", fill = "grey20", alpha = 0.5) +
+geom_rect(aes(xmin = 36, xmax = 79, ymin = 0, ymax = 5), color = NA, fill = "grey80", alpha = 0.5) +
+geom_rect(aes(xmin = 79, xmax = 97, ymin = 0, ymax = 5), color = "grey20", fill = "grey20", alpha = 0.5) +
+ geom_rect(aes(xmin = 97, xmax = 100, ymin = 0, ymax = 5), color = NA, fill = "grey80", alpha = 0.5) +
+ geom_rect(aes(xmin = 100, xmax = 127, ymin = 0, ymax = 5), color = "grey20", fill = "grey20", alpha = 0.5) +
+ geom_rect(aes(xmin = 127, xmax = 132, ymin = 0, ymax = 5), color = NA, fill = "grey80", alpha = 0.5) +
+ geom_rect(aes(xmin = 132, xmax = 151, ymin = 0, ymax = 5), color = "grey20", fill = "grey20", alpha = 0.5) +
+ geom_rect(aes(xmin = 151, xmax = 157, ymin = 0, ymax = 5), color = NA, fill = "grey80", alpha = 0.5) +
+geom_segment(aes(x = 5, y = 0, xend = 157), yend = 0, size = 2) +geom_segment(aes(x = 5, y = 0, xend = 5), yend = 5, size = 2)+geom_segment(aes(x = 157, y = 0, xend = 157), yend = 5, size = 2)+geom_segment(aes(x = 5, y = 5, xend = 157), yend = 5, size = 2)+
+scale_x_continuous(breaks = c(12,36,79,97,100,127,132,151), expand = c(0,0)) +
+scale_y_continuous(breaks = NULL, expand = c(0,0)) + xlab(NULL) + ylab(NULL)+theme(axis.text.x=element_text(size=10,color="black"))
+plot(vkor_architecture_schematic_4TM)
+ggsave(file = "Output/vkor_architecture_schematic_4TM.pdf", vkor_architecture_schematic_4TM, height =0.6, width = 3.6)
+
+
+#3TM model
+vkor_architecture_schematic_3TM <- ggplot() + 
+geom_rect(aes(xmin = 5, xmax = 10, ymin = 0, ymax = 5), color = NA, fill = "grey80", alpha = 0.5) +
+geom_rect(aes(xmin = 10, xmax = 29, ymin = 0, ymax = 5), color = "grey20", fill = "grey20", alpha = 0.5) +
+geom_rect(aes(xmin = 29, xmax = 100, ymin = 0, ymax = 5), color = NA, fill = "grey80", alpha = 0.5) +
+ geom_rect(aes(xmin = 100, xmax = 121, ymin = 0, ymax = 5), color = "grey20", fill = "grey20", alpha = 0.5) +
+ geom_rect(aes(xmin = 121, xmax = 127, ymin = 0, ymax = 5), color = NA, fill = "grey80", alpha = 0.5) +
+ geom_rect(aes(xmin = 127, xmax = 147, ymin = 0, ymax = 5), color = "grey20", fill = "grey20", alpha = 0.5) +
+ geom_rect(aes(xmin = 147, xmax = 157, ymin = 0, ymax = 5), color = NA, fill = "grey80", alpha = 0.5) +
+geom_segment(aes(x = 5, y = 0, xend = 157), yend = 0, size = 2) +geom_segment(aes(x = 5, y = 0, xend = 5), yend = 5, size = 2)+geom_segment(aes(x = 157, y = 0, xend = 157), yend = 5, size = 2)+geom_segment(aes(x = 5, y = 5, xend = 157), yend = 5, size = 2)+
+scale_x_continuous(breaks = c(10,29,100,121,127,147), expand = c(0,0)) +
+scale_y_continuous(breaks = NULL, expand = c(0,0)) + xlab(NULL) + ylab(NULL)+theme(axis.text.x=element_text(size=10,color="black"))
+plot(vkor_architecture_schematic_3TM)
+ggsave(file = "Output/vkor_architecture_schematic_3TM.pdf", vkor_architecture_schematic_3TM, height = 0.6, width = 3.6)
+```
+
+#### Figure 3b: Windowed average of charged scores to determine topology for abundance scores
+```{r fig.height=3, fig.width=8}
+#get an average abundance score at a position based on mut_class
+window_plot_data_abundance<-dplyr::select(vkor_variants,position,abundance_score,class,mut_class)
+window_plot_data_abundance<-window_plot_data_abundance[window_plot_data_abundance$class != "synonymous",]
+window_plot_data_abundance<-window_plot_data_abundance[!is.na(window_plot_data_abundance$abundance_score),]
+window_plot_data_abundance<-window_plot_data_abundance[!is.na(window_plot_data_abundance$mut_class),]
+window_plot_data_final<-ddply(window_plot_data_abundance,c("position", "mut_class"),summarise,mean=mean(abundance_score))
+
+#make dataframes for each mut_class
+charged_df<-(window_plot_data_final[which(window_plot_data_final$mut_class == "Charged"),])
+aliphatic_df<-(window_plot_data_final[which(window_plot_data_final$mut_class == "Aliphatic uncharged"),])
+aromatic_df<-(window_plot_data_final[which(window_plot_data_final$mut_class == "Aromatic"),])
+proline_df<-(window_plot_data_final[which(window_plot_data_final$mut_class == "Proline"),])
+hydrophilic_df<-(window_plot_data_final[which(window_plot_data_final$mut_class == "Hydrophilic uncharged"),])
+nonpolar_df<-(window_plot_data_final[which(window_plot_data_final$mut_class == "Nonpolar uncharged"),])
+nonsense_df<-(window_plot_data_final[which(window_plot_data_final$mut_class == "Nonsense"),])
+
+#need to fill-in missing positions, create a seq of 2 to 163, then merge with orig df
+pos_df<-data.frame(position = seq(from=2, to=max(window_plot_data_final$position)))
+charged_df<-merge(pos_df, charged_df, all.x = TRUE) 
+aliphatic_df<-merge(pos_df, aliphatic_df, all.x = TRUE) 
+aromatic_df<-merge(pos_df, aromatic_df, all.x = TRUE) 
+proline_df<-merge(pos_df, proline_df, all.x = TRUE) 
+hydrophilic_df<-merge(pos_df, hydrophilic_df, all.x = TRUE) 
+nonpolar_df<-merge(pos_df, nonpolar_df, all.x = TRUE) 
+nonsense_df<-merge(pos_df, nonsense_df, all.x = TRUE) 
+
+
+#Use rollapply to calculate windowed average
+charged_window<-rollapply(as.numeric(charged_df$mean), width = 10,FUN = mean, align = "center", na.rm=TRUE)
+aliphatic_window<-rollapply(as.numeric(aliphatic_df$mean), width = 10,FUN = mean, align = "center", na.rm=TRUE)
+aromatic_window<-rollapply(as.numeric(aromatic_df$mean), width = 10,FUN = mean, align = "center", na.rm=TRUE)
+proline_window<-rollapply(as.numeric(proline_df$mean), width = 10,FUN = mean, align = "center", na.rm=TRUE)
+hydrophilic_window<-rollapply(as.numeric(hydrophilic_df$mean), width = 10,FUN = mean, align = "center", na.rm=TRUE)
+nonpolar_window<-rollapply(as.numeric(nonpolar_df$mean), width = 10,FUN = mean, align = "center", na.rm=TRUE)
+nonsense_window<-rollapply(as.numeric(nonsense_df$mean), width = 10,FUN = mean, align = "center", na.rm=TRUE)
+
+
+charged_window<-data.frame(pos=seq(from=5, to=157, by=1),mean=charged_window)
+charged_window$class<-"charged"
+aliphatic_window<-data.frame(pos=seq(from=5, to=157, by=1),mean=aliphatic_window)
+aliphatic_window$class<-"aliphatic"
+aromatic_window<-data.frame(pos=seq(from=5, to=157, by=1),mean=aromatic_window)
+aromatic_window$class<-"aromatic"
+proline_window<-data.frame(pos=seq(from=5, to=157, by=1),mean=proline_window)
+proline_window$class<-"proline"
+hydrophilic_window<-data.frame(pos=seq(from=5, to=157, by=1),mean=hydrophilic_window)
+hydrophilic_window$class<-"hydrophilic"
+nonpolar_window<-data.frame(pos=seq(from=5, to=157, by=1),mean=nonpolar_window)
+nonpolar_window$class<-"nonpolar"
+nonsense_window<-data.frame(pos=seq(from=5, to=157, by=1),mean=nonsense_window)
+nonsense_window$class<-"nonsense"
+
+#combine all these dataframes back together 
+complete_window_data<-rbind(charged_window, aliphatic_window, aromatic_window, proline_window, hydrophilic_window, nonpolar_window,nonsense_window)
+
+#charged amino acids with aliphatics as a negative control
+charged_window_score_plot_abundance<-ggplot() +geom_line(data=subset(complete_window_data,class=="charged"), aes (x=pos, y = mean),colour="#009E73",size=1.25)+geom_line(data=subset(complete_window_data,class=="aliphatic"), aes (x=pos, y = mean),colour="#E69F00",size=1.25)+ scale_x_continuous(breaks = seq(10,150,20),limits=c(5,157),expand = c(0, 0))+scale_y_continuous(breaks=seq(0,1,0.25), limits=c(0,1.1))+annotate("rect", xmin=12, xmax=36, ymin=-Inf, ymax=Inf, alpha=0.2, fill="grey20")+annotate("rect", xmin=79, xmax=97, ymin=-Inf, ymax=Inf, alpha=0.2, fill="grey20")+annotate("rect", xmin=100, xmax=127, ymin=-Inf, ymax=Inf, alpha=0.2, fill="grey20")+annotate("rect", xmin=132, xmax=151, ymin=-Inf, ymax=Inf, alpha=0.2, fill="grey20")+geom_hline(yintercept=1,linetype="dashed")+geom_hline(yintercept = 0,linetype="dashed")+xlab("Position")+ylab("Windowed average \n(abundance score)")+
+  theme(axis.text.x =element_text(size=10,color="black"),
+        axis.text.y=element_text(size=10,color="black"),
+        axis.title=element_text(size=10,color="black"))
+plot(charged_window_score_plot_abundance)
+ggsave("Output/charged_window_plot_abundance.pdf", charged_window_score_plot_abundance, height = 1.25, width = 4.35)
+
+```
+
+#### Figure 3c: Windowed average of charged scores to determine topology for activity scores
+```{r fig.height=2, fig.width=8}
+
+#get an average activity score at a position based on mut_class
+window_plot_data_activity<-dplyr::select(vkor_variants,position,activity_score,class,mut_class)
+window_plot_data_activity<-window_plot_data_activity[window_plot_data_activity$class != "synonymous",]
+window_plot_data_activity<-window_plot_data_activity[!is.na(window_plot_data_activity$activity_score),]
+window_plot_data_activity<-window_plot_data_activity[!is.na(window_plot_data_activity$mut_class),]
+window_plot_data_final<-ddply(window_plot_data_activity,c("position", "mut_class"),summarise,mean=mean(activity_score))
+
+#make dataframes for each mut_class
+charged_df<-(window_plot_data_final[which(window_plot_data_final$mut_class == "Charged"),])
+aliphatic_df<-(window_plot_data_final[which(window_plot_data_final$mut_class == "Aliphatic uncharged"),])
+aromatic_df<-(window_plot_data_final[which(window_plot_data_final$mut_class == "Aromatic"),])
+proline_df<-(window_plot_data_final[which(window_plot_data_final$mut_class == "Proline"),])
+hydrophilic_df<-(window_plot_data_final[which(window_plot_data_final$mut_class == "Hydrophilic uncharged"),])
+nonpolar_df<-(window_plot_data_final[which(window_plot_data_final$mut_class == "Nonpolar uncharged"),])
+nonsense_df<-(window_plot_data_final[which(window_plot_data_final$mut_class == "Nonsense"),])
+
+
+#need to fill-in missing positions, create a seq of 2 to 163, then merge with orig df
+pos_df<-data.frame(position = seq(from=2, to=max(window_plot_data_final$position)))
+charged_df<-merge(pos_df, charged_df, all.x = TRUE) 
+aliphatic_df<-merge(pos_df, aliphatic_df, all.x = TRUE) 
+aromatic_df<-merge(pos_df, aromatic_df, all.x = TRUE) 
+proline_df<-merge(pos_df, proline_df, all.x = TRUE) 
+hydrophilic_df<-merge(pos_df, hydrophilic_df, all.x = TRUE) 
+nonpolar_df<-merge(pos_df, nonpolar_df, all.x = TRUE) 
+nonsense_df<-merge(pos_df, nonsense_df, all.x = TRUE) 
+
+
+#Use rollapply to calculate windowed average
+charged_window<-rollapply(as.numeric(charged_df$mean), width = 10,FUN = mean, align = "center", na.rm=TRUE)
+aliphatic_window<-rollapply(as.numeric(aliphatic_df$mean), width = 10,FUN = mean, align = "center", na.rm=TRUE)
+aromatic_window<-rollapply(as.numeric(aromatic_df$mean), width = 10,FUN = mean, align = "center", na.rm=TRUE)
+proline_window<-rollapply(as.numeric(proline_df$mean), width = 10,FUN = mean, align = "center", na.rm=TRUE)
+hydrophilic_window<-rollapply(as.numeric(hydrophilic_df$mean), width = 10,FUN = mean, align = "center", na.rm=TRUE)
+nonpolar_window<-rollapply(as.numeric(nonpolar_df$mean), width = 10,FUN = mean, align = "center", na.rm=TRUE)
+nonsense_window<-rollapply(as.numeric(nonsense_df$mean), width = 10,FUN = mean, align = "center", na.rm=TRUE)
+
+
+charged_window<-data.frame(pos=seq(from=5, to=157, by=1),mean=charged_window)
+charged_window$class<-"charged"
+aliphatic_window<-data.frame(pos=seq(from=5, to=157, by=1),mean=aliphatic_window)
+aliphatic_window$class<-"aliphatic"
+aromatic_window<-data.frame(pos=seq(from=5, to=157, by=1),mean=aromatic_window)
+aromatic_window$class<-"aromatic"
+proline_window<-data.frame(pos=seq(from=5, to=157, by=1),mean=proline_window)
+proline_window$class<-"proline"
+hydrophilic_window<-data.frame(pos=seq(from=5, to=157, by=1),mean=hydrophilic_window)
+hydrophilic_window$class<-"hydrophilic"
+nonpolar_window<-data.frame(pos=seq(from=5, to=157, by=1),mean=nonpolar_window)
+nonpolar_window$class<-"nonpolar"
+nonsense_window<-data.frame(pos=seq(from=5, to=157, by=1),mean=nonsense_window)
+nonsense_window$class<-"nonsense"
+
+#combine all these dataframes back together 
+complete_window_data<-rbind(charged_window, aliphatic_window, aromatic_window, proline_window, hydrophilic_window, nonpolar_window, nonsense_window)
+
+#charged amino acids and aliphatics as negative control
+charged_window_score_plot_activity<-ggplot()+geom_line(data=subset(complete_window_data,class=="charged"), aes (x=pos, y = mean),colour="#009E73",size=1.25)+geom_line(data=subset(complete_window_data,class=="aliphatic"), aes (x=pos, y = mean),colour="#E69F00",size=1.25)+ scale_x_continuous(breaks = seq(10,150,20),limits=c(5,157),expand = c(0, 0))+scale_y_continuous(breaks=seq(0,1,0.25), limits=c(0,1.1))+xlab("Position")+ ylab("Windowed average \n(activity score)")+annotate("rect", xmin=12, xmax=36, ymin=-Inf, ymax=Inf, alpha=0.2, fill="grey20")+annotate("rect", xmin=79, xmax=97, ymin=-Inf, ymax=Inf, alpha=0.2, fill="grey20")+annotate("rect", xmin=100, xmax=127, ymin=-Inf, ymax=Inf, alpha=0.2, fill="grey20")+annotate("rect", xmin=132, xmax=151, ymin=-Inf, ymax=Inf, alpha=0.2, fill="grey20")+geom_hline(yintercept = 1,linetype="dashed")+geom_hline(yintercept = 0,linetype="dashed")+
+  theme(axis.text.x =element_text(size=10,color="black"),
+        axis.text.y=element_text(size=10,color="black"),
+        axis.title=element_text(size=10,color="black"))
+plot(charged_window_score_plot_activity)
+ggsave("Output/charged_window_plot_activity.pdf", charged_window_score_plot_activity, height = 1.25, width = 4.35)
+
+```
+
+#### Figure 3d: Plotting of evolutionary coupling data secondary structure
+```{r fig.height=2, fig.width=8}
+evo_couplings_secondary_structure<-read.csv("vkor_EVcouplings_2ndary_structure_prediction.csv",header=TRUE)
+colnames(evo_couplings_secondary_structure)<-c("position","start","alpha","beta","alpha_call","beta_call")
+
+secondary_structure_plot<-ggplot(evo_couplings_secondary_structure)+geom_line(aes(x=position,y=alpha),colour="#D55E00",size=1.25)+geom_line(aes(x=position,y=beta),colour="#56B4E9",size=1.25)+ scale_x_continuous(breaks = seq(10,150,20),limits=c(5,157),expand = c(0, 0))+scale_y_continuous(breaks=seq(-5,10,5), limits=c(-5,10))+xlab("Position")+ ylab("Alpha score")+annotate("rect", xmin=12, xmax=36, ymin=-Inf, ymax=Inf, alpha=0.2, fill="grey20")+annotate("rect", xmin=79, xmax=97, ymin=-Inf, ymax=Inf, alpha=0.2, fill="grey20")+annotate("rect", xmin=100, xmax=127, ymin=-Inf, ymax=Inf, alpha=0.2, fill="grey20")+annotate("rect", xmin=132, xmax=151, ymin=-Inf, ymax=Inf, alpha=0.2, fill="grey20")+geom_hline(yintercept = 0.75,linetype="dashed",colour="#56B4E9")+geom_hline(yintercept = 1.5,linetype="dashed",colour="#D55E00")+
+  theme(axis.text.x =element_text(size=10,color="black"),
+        axis.text.y=element_text(size=10,color="black"),
+        axis.title=element_text(size=10,color="black"))
+plot(secondary_structure_plot)
+ggsave("Output/evolutionary_couplings_secondary_structure_prediction.pdf", secondary_structure_plot, height = 1.25, width = 4.1)
+```
+
+#### Figure 3d: Plotting of evolutionary coupling data tertiary structure
+```{r fig.height=4, fig.width=4}
+evo_couplings_3D_contacts<-read.csv("vkor_EVcouplings_3d_contact_predictions.csv",header=TRUE)
+
+evo_couplings_contact_map<-ggplot()+geom_point(data=subset(evo_couplings_3D_contacts, probability> 0.7),aes(x=j,y=i))+geom_point(data=subset(evo_couplings_3D_contacts, probability> 0.7),aes(x=i,y=j))+geom_point(data=subset(evo_couplings_3D_contacts, probability> 0.7 & i<30 & j>130),aes(x=j,y=i),fill="#31a354",shape=21,size=2)+geom_point(data=subset(evo_couplings_3D_contacts, probability> 0.7 & i<35 & j<100 & j>75),aes(x=j,y=i),fill="#a1d99b",shape=21,size=2)+scale_x_continuous(breaks=seq(0,160,20))+scale_y_reverse(breaks=seq(0,160,20))+xlab("Position")+ ylab("Position")+
+  theme(axis.text.x =element_text(size=10,color="black",angle=90,hjust=0.95),
+        axis.text.y=element_text(size=10,color="black"),
+        axis.title=element_text(size=10,color="black"))
+plot(evo_couplings_contact_map)
+ggsave("Output/evolutionary_couplings_contact_map.pdf", evo_couplings_contact_map, height = 2.5, width = 2.5)
+
+#mini model of topology to go on top
+
+vkor_architecture_schematic_4TM_mini <- ggplot() + 
+geom_rect(aes(xmin = 5, xmax = 12, ymin = 0, ymax = 5), color = NA, fill = "grey80", alpha = 0.5) +
+geom_rect(aes(xmin = 12, xmax = 36, ymin = 0, ymax = 5), color = "grey20", fill = "grey20", alpha = 0.5) +
+geom_rect(aes(xmin = 36, xmax = 79, ymin = 0, ymax = 5), color = NA, fill = "grey80", alpha = 0.5) +
+geom_rect(aes(xmin = 79, xmax = 97, ymin = 0, ymax = 5), color = "grey20", fill = "grey20", alpha = 0.5) +
+ geom_rect(aes(xmin = 97, xmax = 100, ymin = 0, ymax = 5), color = NA, fill = "grey80", alpha = 0.5) +
+ geom_rect(aes(xmin = 100, xmax = 127, ymin = 0, ymax = 5), color = "grey20", fill = "grey20", alpha = 0.5) +
+ geom_rect(aes(xmin = 127, xmax = 132, ymin = 0, ymax = 5), color = NA, fill = "grey80", alpha = 0.5) +
+ geom_rect(aes(xmin = 132, xmax = 151, ymin = 0, ymax = 5), color = "grey20", fill = "grey20", alpha = 0.5) +
+ geom_rect(aes(xmin = 151, xmax = 157, ymin = 0, ymax = 5), color = NA, fill = "grey80", alpha = 0.5) +
+geom_segment(aes(x = 5, y = 0, xend = 157), yend = 0, size = 0.5) +geom_segment(aes(x = 5, y = 0, xend = 5), yend = 5, size = 0.5)+geom_segment(aes(x = 157, y = 0, xend = 157), yend = 5, size = 0.5)+geom_segment(aes(x = 5, y = 5, xend = 157), yend = 5, size = 0.5)+scale_x_continuous(breaks = NULL, expand = c(0,0)) +
+scale_y_continuous(breaks = NULL, expand = c(0,0)) + xlab(NULL) + ylab(NULL)+theme(axis.text.x=element_blank())
+plot(vkor_architecture_schematic_4TM_mini)
+ggsave(file = "Output/vkor_architecture_schematic_4TM_mini.pdf", vkor_architecture_schematic_4TM_mini, height =0.3, width = 2)
+```
+
+#### Figure 3h: how do VAMP-seq scores from TMDs compare to Sec61 delta delta Gs
+```{r Compare to Elazar et al. data from this paper: https://elifesciences.org/articles/12125}
+elazar_data<-read.table("elazar_insertion_energies.csv",sep=',',header=TRUE)
+
+#rename columns
+colnames(elazar_data)<-c("end","delta_G")
+
+#merge by "end" column with vkor_residue_median
+vkor_residue_median_TMDs_agreed <- ddply(subset(vkor_variants, class == "missense" & specific_domain %in% c("TM1","TM2","TM3") & !(is.na(abundance_score)))[,c("end","abundance_score")], "end", numcolwise(median))
+vkor_residue_median_TMD2 <- ddply(subset(vkor_variants, class == "missense" & specific_domain== "TM2" & !(is.na(abundance_score)))[,c("end","abundance_score","mut_class")], "end", numcolwise(median))
+vkor_residue_median_non_TMD <- ddply(subset(vkor_variants, class == "missense" & specific_domain %in% c("long_ER_loop","small_ER_loop","cyto_N_terminal","cyto_C_terminal","cyto_TM2_to_TM3") & !(is.na(abundance_score)))[,c("end","abundance_score","mut_class")], "end", numcolwise(median))
+
+elazar_end_residue_median <- merge(vkor_residue_median_TMDs_agreed, elazar_data, by = "end")
+colnames(elazar_end_residue_median)<-c("end","abundance_score_consensus_TMDs","delta_G")
+elazar_end_residue_median <- merge(elazar_end_residue_median, vkor_residue_median_TMD2, by = "end")
+colnames(elazar_end_residue_median)<-c("end","abundance_score_consensus_TMDs","delta_G","abundance_score_TMD2")
+elazar_end_residue_median <- merge(elazar_end_residue_median, vkor_residue_median_non_TMD, by = "end")
+colnames(elazar_end_residue_median)<-c("end","abundance_score_consensus_TMDs","delta_G","abundance_score_TMD2","abundance_score_non_TMD")
+
+elazar_end_residue_median$mut_class<-NA
+elazar_end_residue_median[which(elazar_end_residue_median$end %in% c("H","K","R","D","E")),]$mut_class<-"Charged"
+elazar_end_residue_median[which(elazar_end_residue_median$end %in% c("S","T","N","Q","C","M","P","F","Y","W","G","A","V","I","L")),]$mut_class<-"Other"
+
+elazar_ending_residue_median_scatterplot <- ggplot() + geom_point(data = elazar_end_residue_median, aes(x = abundance_score_consensus_TMDs, y = delta_G, shape=mut_class), size=2, colour="#31a354") + geom_point(data = elazar_end_residue_median, aes(x = abundance_score_TMD2, y = delta_G, shape=mut_class), size=2,colour="#a1d99b") + geom_point(data = elazar_end_residue_median, aes(x = abundance_score_non_TMD, y = delta_G, shape=mut_class),  size=2,colour="black") +
+xlab("Median abundance score") + ylab("ΔG")+ scale_y_continuous(limits = c(-3, 3), breaks = seq(-3,3,1))+theme_classic()+
+  theme(axis.text.x =element_text(size=10,color="black"),
+        axis.text.y=element_text(size=10,color="black"),
+        axis.title=element_text(size=10,color="black"),
+        legend.position = "none")
+print(elazar_ending_residue_median_scatterplot)
+ggsave(file = "Output/elazar_ending_residue_median_scatterplot.pdf", elazar_ending_residue_median_scatterplot, height = 2, width = 3)
+```
+
+#### Figure 4a: Hierarchical clustering of positions based on abundance score vectors
+```{r Clustering by position}
+clustering_data<-vkor_variants[vkor_variants$class=="missense",] %>%
+group_by(position)
+
+clustering_data<-dplyr::select(clustering_data,position,end,abundance_score)
+clustering_data$position<-as.factor(clustering_data$position)
+
+#use spread from tidy r to cast from long form to wide form
+clustering_data_wide<-spread(clustering_data, end, abundance_score)
+clustering_data_wide<-as.data.frame(clustering_data_wide)
+row.names(clustering_data_wide)<-clustering_data_wide$position
+clustering_data_wide<-clustering_data_wide[,2:21]
+clustering_data_wide_matrix<-as.matrix(clustering_data_wide)
+# find distance matrix 
+d <- dist(as.matrix(clustering_data_wide)) 
+hc <- hclust(d, "complete")
+dend<-as.dendrogram(hc)
+dend_order<-unique(sort(clustering_data$position))[order.dendrogram(dend)]
+#reordering dend_order to pivot around node of groups 3 and 4
+dend_order<-as.character(c(33,37,30,35,26,106,123,107,127,128, 7,6,4,11,2,3,129,68,53,58,151,162,47,72,104,103,152,81,79,60,84,138,155,124,163,156,160,154,157,158,40,153,93,113,116,31,56,34,46,135,99,61,139,136,14,21,76,133,86,111,143,146,140,112,115,105,137,18,109, 114, 85,22,94,92,17,24,50,117,149,134,27,41,97,122,108,82,147,150,13,95,89,90,121,96,118,65,78,10,12,131,5,75,45,70,54,63,144,32,48,28,125,69,126,101,8,66,80,29,43,91,120,148,36,49,55,83,119, 15,20,87,39,59,25,159,161,9,51,23,42,98,67,73,52,57,77,62,64,71,74,44,142,100,38,130,132,16,102,110,19,88,141,145))
+#updated dendrograms
+dend<-dendextend::rotate(dend, dend_order)
+
+position_cluster_dendrogram<-ggdendrogram(hc, rotate = FALSE, size = 2)
+ddata <- dendro_data(dend, type = "rectangle")
+p <- ggplot(segment(ddata)) +geom_segment(aes(x = x, y = y, xend = xend, yend = yend)) + theme_dendro()
+clustering_data$end <- factor(clustering_data$end, levels = c("A","V","I","L","M","F","Y","W","S","T","N","Q","C","G","P","R","H","K","D","E"))
+plot(p)
+ggsave("Output/position_cluster_dendrogram.pdf", p,height = 1, width = 6)
+
+#cut dendrogram to isolate four groups of mutational patterns
+cluster_assignments<-cutree(hc,k=4)
+
+#color according to cluster
+dend1 <- color_branches(dend, k = 4, col =c("#7b3294","#c2a5cf","#a6dba0","#008837"))
+dend1<-highlight_branches_lwd(dend1,1)
+pdf("Output/colored_dendrogram.pdf",   
+    width =8.03, 
+    height = 3)
+plot(dend1,
+     xaxt="n",
+     yaxt="n",
+     ann=FALSE)
+dev.off()
+
+#add 1 here because indexing starts at 1, put numbering in VKOR starts at 2 for this dataset (1st M not present)
+cluster_1_indices<-which(cluster_assignments==1)
+cluster_1_positions<-as.numeric(cluster_1_indices) + 1
+cluster_1_positions<-paste(cluster_1_positions,collapse="+")
+cluster_2_indices<-which(cluster_assignments==2)
+cluster_2_positions<-as.numeric(cluster_2_indices) + 1
+cluster_2_positions<-paste(cluster_2_positions,collapse="+")
+cluster_3_indices<-which(cluster_assignments==3)
+cluster_3_positions<-as.numeric(cluster_3_indices) + 1
+cluster_3_positions<-paste(cluster_3_positions,collapse="+")
+cluster_4_indices<-which(cluster_assignments==4)
+cluster_4_positions<-as.numeric(cluster_4_indices) + 1
+cluster_4_positions<-paste(cluster_4_positions,collapse="+")
+
+dend_heatmap_aa_order <- c("A","V","I","L","M","F","Y","W","S","T","N","Q","C","G","P","R","H","K","D","E")
+
+dend_heatmap<- ggplot() +
+geom_tile(data = missing_combinations, aes(x = factor(position), y = end), fill = "grey70") +
+geom_tile(data = subset(vkor_variants, (class == "missense") & abundance_score > vkor_lower_bound_abundance & abundance_score < vkor_upper_bound_abundance), aes(x = factor(position), y = end, fill = abundance_score)) +
+geom_tile(data = subset(vkor_variants, (class == "missense") & abundance_score >= vkor_upper_bound_abundance), aes(x = factor(position), y = end, fill = abundance_score)) +
+geom_tile(data = subset(vkor_variants, (class == "missense") & abundance_score <= vkor_lower_bound_abundance), aes(x = factor(position), y = end), fill = "blue") +
+geom_tile(data = wtseqframe, aes(x = factor(position), y= end, fill = abundance_score)) +
+geom_point(data = wtseqframe, aes(x = factor(position), y = end), shape = 15, size = 0.4) +
+xlab(NULL) +scale_x_discrete(limits=dend_order,labels=dend_order)+ scale_y_discrete(limits = rev(dend_heatmap_aa_order)) +ylab(NULL) +
+scale_fill_gradientn(colours = c("blue","white","red"), values = rescale(c(vkor_lower_bound_abundance,vkor_upper_bound_abundance,2)), limits=c(vkor_lower_bound_abundance,2)) +
+  theme(axis.text.x=element_blank(),
+        axis.text.y=element_text(size=10,color="black", hjust=0.5),
+        axis.ticks.x=element_blank(), 
+        panel.grid.major = element_line(colour = "grey90"),
+        legend.title = element_blank(),
+        legend.text = element_text(size = 8,color="black"),
+        legend.key.width=unit(0.5,"cm"),
+        legend.key.height = unit(1.4,"cm"))+ylab("Amino acid")+labs(fill = "Abundance score")
+plot(dend_heatmap)
+ggsave("Output/heatmap_in_dendrogram_order.pdf", dend_heatmap,height = 3, width = 7.55)
+```
+
+#### Figure 4b: Create pymol script
+```{r}
+# Create a vector of commands common to all pymol scripting I'll be doing
+pymol_setup <- c()
+# Import the PDB and do initial setup steps
+pymol_setup <- append(pymol_setup, c("reinitialize","load itasser_vkor_model1.pdb","bg_color white","set opaque_background, 0","hide all","set ray_trace_mode, 1"))
+# Create individual objects for vkor and the substrate
+pymol_setup <- append(pymol_setup, c("create vkor, not resn HOH","delete itasser_vkor_model1","color white, vkor","show cartoon, vkor","orient vkor","set cartoon_gap_cutoff, 0"))
+# Set the view to a common useful orientation
+pymol_vkor_standard_view<-c("orient vkor","set_view (0.656203687,0.527281523,0.539783299,-0.593606174,0.802352965,-0.062142376,-0.465864658,-0.279636621,0.839497745,-0.000038132,-0.000523172,-186.717590332,62.718372345,60.053791046,59.686286926,-107.184852600,480.856170654,-20.000000000)")
+
+fileConn<-file("Output/pymol_vkor_setup.pml")
+writeLines(c(pymol_setup,pymol_vkor_standard_view,sep=""), fileConn)
+close(fileConn)
+```
+
+#### Figure 4b: Coloring positions based on membership in hierarchical clustering dendrogram
+```{r}
+#Use hierarchical cluster assignments to automate coloring of positions in Pymol
+pymol_custom_color<-c()
+pymol_custom_color<-append(pymol_custom_color,paste("set_color mycol1,[123,50,148]"))
+pymol_custom_color<-append(pymol_custom_color,paste("set_color mycol2,[194,165,207]"))
+pymol_custom_color<-append(pymol_custom_color,paste("set_color mycol3,[166,219,160]"))
+pymol_custom_color<-append(pymol_custom_color,paste("set_color mycol4,[0,136,55]"))
+pymol_color_cluster1<-c()
+pymol_color_cluster1<-append(pymol_color_cluster1,paste("create cluster_1, vkor and resi ",gsub(", ","+",toString(cluster_1_positions))," and not name c+n+o", sep= ""))
+pymol_color_cluster1<-append(pymol_color_cluster1,c("hide all","color mycol1, cluster_1","set_bond stick_radius,0.85, cluster_1","show sticks, cluster_1","show cartoon, vkor"))
+pymol_color_cluster2<-c()
+pymol_color_cluster2<-append(pymol_color_cluster2,paste("create cluster_2, vkor and resi ",gsub(", ","+",toString(cluster_2_positions))," and not name c+n+o", sep= ""))
+pymol_color_cluster2<-append(pymol_color_cluster2,c("hide all","color mycol2, cluster_2", "set_bond stick_radius,0.85, cluster_2", "show sticks, cluster_2","show cartoon, vkor"))
+pymol_color_cluster3<-c()
+pymol_color_cluster3<-append(pymol_color_cluster3,paste("create cluster_3, vkor and resi ",gsub(", ","+",toString(cluster_3_positions))," and not name c+n+o", sep= ""))
+pymol_color_cluster3<-append(pymol_color_cluster3,c("hide all","color mycol3, cluster_3","set_bond stick_radius,0.85, cluster_3","show sticks, cluster_3","show cartoon, vkor"))
+pymol_color_cluster4<-c()
+pymol_color_cluster4<-append(pymol_color_cluster4,paste("create cluster_4, vkor and resi ",gsub(", ","+",toString(cluster_4_positions))," and not name c+n+o", sep= ""))
+pymol_color_cluster4<-append(pymol_color_cluster4,c("hide all","color mycol4, cluster_4","set_bond stick_radius,0.85, cluster_4", "show sticks, cluster_4","show cartoon, vkor"))
+
+fileConn<-file("Output/pymol_vkor_hierarchical_cluster1_colors.pml")
+writeLines(c(pymol_custom_color,pymol_color_cluster1,pymol_vkor_standard_view,
+ paste("png ",markdown_directory,"/plots/pymol_vkor_cluster1.png,height=8cm, width=7cm, dpi=300, ray=1",sep="")
+ ), fileConn)
+close(fileConn)
+
+fileConn<-file("Output/pymol_vkor_hierarchical_cluster2_colors.pml")
+writeLines(c(pymol_custom_color,pymol_color_cluster2,pymol_vkor_standard_view,
+ paste("png ",markdown_directory,"/plots/pymol_vkor_cluster2.png, height=8cm, width=7cm, dpi=300, ray=1",sep="")
+ ), fileConn)
+close(fileConn)
+
+fileConn<-file("Output/pymol_vkor_hierarchical_cluster3_colors.pml")
+writeLines(c(pymol_custom_color,pymol_color_cluster3,pymol_vkor_standard_view,
+ paste("png ",markdown_directory,"/plots/pymol_vkor_cluster3.png, height=8cm, width=7cm, dpi=300, ray=1",sep="")
+ ), fileConn)
+close(fileConn)
+
+fileConn<-file("Output/pymol_vkor_hierarchical_cluster4_colors.pml")
+writeLines(c(pymol_custom_color,pymol_color_cluster4,pymol_vkor_standard_view,
+ paste("png ",markdown_directory,"/plots/pymol_vkor_cluster4.png, height=8cm, width=7cm, dpi=300, ray=1",sep="")
+ ), fileConn)
+close(fileConn)
+
+```
+
+#### Figure 4c: RSA by mutatational tolerance group
+```{r}
+#RSA by hierarchical clustering membership group
+rsa_clustering_plot<-ggplot(vkor_positions,aes(x=hc_cluster_membership,y=rsa))+geom_boxplot(aes(fill=hc_cluster_membership))+scale_fill_manual(values=c("#7b3294","#c2a5cf","#a6dba0","#008837"))+ylab("Relative solvent accessibility")+xlab("Cluster")+
+  theme(axis.text.x =element_text(size=10,color="black"),
+        axis.text.y=element_text(size=10,color="black"),
+        axis.title.y=element_text(size=12,color="black"),
+        axis.title.x=element_text(size=12,color="black"),
+        legend.position = "none")
+plot(rsa_clustering_plot)
+ggsave("Output/rsa_by_group_plot.pdf", rsa_clustering_plot,height = 2.25, width = 2.25)
+```
+
+
+#### Figure 4d: VKOR missense distribution is trimodal and segregates by domain
+```{r fig.height=6, fig.width=3}
+missense_variants<-vkor_variants[vkor_variants$class=="missense",]
+
+#Histogram of VKOR missense variants colored by position in protein: TM/ER/cytosol
+vkor_score_by_domain_histogram_abundance<-ggplot(missense_variants,aes(x=abundance_score))+geom_histogram(bins=40,fill="grey50")+ scale_y_continuous(breaks=seq(0,100,50))+facet_grid(domain ~ .)+xlab("Abundance score")+ylab("Variant count")+
+  theme(axis.text.x =element_text(size=10,color="black"),
+        axis.text.y=element_text(size=10,color="black"),
+        axis.title=element_text(size=12,color="black"),
+        strip.text = element_blank())
+print(vkor_score_by_domain_histogram_abundance)
+ggsave(file="Output/vkor_missense_abundance_histogram_by_domain_facet_grid.pdf",vkor_score_by_domain_histogram_abundance, height = 2.5, width = 2.25)
+
+#Histogram of VKOR missense variants colored by position in protein: TM/ER/cytosol
+vkor_score_by_domain_histogram_activity<-ggplot(missense_variants,aes(x=activity_score))+geom_histogram(bins=50,fill="grey50")+ theme(panel.grid.major = element_blank(), panel.grid.minor = element_blank(),panel.background = element_blank(),legend.position = "none")+facet_grid(domain ~ .)+xlab("Activity score")+ylab("Variant count")+
+  theme(axis.text.x =element_text(size=10,color="black"),
+        axis.text.y=element_text(size=10,color="black"),
+        axis.title=element_text(size=12,color="black"),
+        strip.text = element_blank())
+print(vkor_score_by_domain_histogram_activity)
+ggsave(file="Output/vkor_missense_activity_histogram_by_domain_facet_grid.pdf",vkor_score_by_domain_histogram_activity, height = 2.5, width = 2.25)
+```
+
+#### Figure 5: Create a score that is ratio of activity and abundance (specific activity) to define active site residues
+```{r}
+#Rescale activity and abundance scores so they are both from 0 to 1
+missense_variants$activity_score_rescaled<-NA
+missense_variants$abundance_score_rescaled<-NA
+missense_variants$activity_score_rescaled<-rescale(missense_variants$activity_score,to=c(0,1))
+missense_variants$abundance_score_rescaled<-rescale(missense_variants$abundance_score,to=c(0,1))
+
+#Calculate activity to abundance for every variant
+missense_variants$ratio_activity_abundance<-(missense_variants$activity_score_rescaled)/(missense_variants$abundance_score_rescaled)
+
+vkor_position_specific_activity_histogram<-ggplot()+geom_histogram(data=vkor_positions,bins=50,aes(x=ratio_activity_abundance))+geom_histogram(data=subset(vkor_positions, position %in% c(132,135)),bins=50,aes(x=ratio_activity_abundance),fill="blue")+scale_x_continuous(lim=c(-1,10))+geom_vline(xintercept = quantile(vkor_positions$ratio_activity_abundance,0.125,na.rm = TRUE), linetype = 2)+
+  theme(panel.background = element_rect(fill = "white"),
+        axis.text.x =element_text(size=10,color="black"),
+        axis.text.y=element_text(size=10,color="black"),
+        axis.title=element_text(size=12,color="black"))+  
+  xlab("Specific activity")+
+  ylab("Count")
+ggsave(file = "Output/vkor_position_specific_activity_histogram.pdf", vkor_position_specific_activity_histogram, height = 3, width = 3)
+
+active_site_positions<-vkor_positions[vkor_positions$ratio_activity_abundance < quantile(vkor_positions$ratio_activity_abundance,0.125,na.rm=TRUE) & vkor_positions$variants_scored_activity>3,"position"]
+active_site_positions<-active_site_positions[!is.na(active_site_positions)]
+active_site_positions<-unique(active_site_positions)
+
+#mini heatmaps for active site positions
+active_site_full_variant_heatmap <- ggplot() +
+geom_tile(data = subset(missing_combinations,position %in% active_site_positions), aes(x = factor(position), y = end), fill = "grey70") +
+geom_tile(data = subset(vkor_variants, position %in% active_site_positions & (class == "missense" | class == "nonsense") & abundance_score > vkor_lower_bound_abundance & abundance_score < vkor_upper_bound_abundance), aes(x = factor(position), y = end, fill = abundance_score)) +
+geom_tile(data = subset(vkor_variants, position %in% active_site_positions & (class == "missense" | class == "nonsense") & abundance_score >= vkor_upper_bound_abundance), aes(x = factor(position), y = end, fill = abundance_score)) +
+geom_tile(data = subset(vkor_variants, position %in% active_site_positions & (class == "missense" | class == "nonsense") & abundance_score <= vkor_lower_bound_abundance), aes(x = factor(position), y = end), fill = "blue") +
+geom_tile(data = subset(wtseqframe, position %in% active_site_positions), aes(x = factor(position), y= end, fill = abundance_score)) +
+geom_point(data = subset(wtseqframe, position %in% active_site_positions), aes(x = factor(position), y = end), shape = 15, size = 0.4) +scale_x_discrete(limits=as.character(active_site_positions))+ scale_y_discrete(limits = unique(rev(missing_combinations$end)))+
+scale_fill_gradientn(colours = c("blue","white","red"), values = rescale(c(vkor_lower_bound_abundance,vkor_upper_bound_abundance,2)), limits=c(vkor_lower_bound_abundance,2)) +xlab("Position")+ylab("Amino acid")+
+  theme(panel.background = element_rect(fill = "white"),
+        panel.grid.major = element_line(colour = "grey90"),
+        axis.text.x =element_text(size=8,color="black", angle=-90, vjust=0.95),
+        axis.text.y=element_text(size=6,color="black",hjust=0.5),
+        axis.title=element_text(size=8,color="black"),
+        legend.title = element_text(size=8),
+        legend.text = element_text(size=8),
+        legend.position = "top")+ labs(fill = "Abundance score")
+ggsave(file = "Output/active_site_full_variant_abundance_heatmap.pdf", active_site_full_variant_heatmap, height = 3, width = 2.5)
+
+#Make a heatmap of active site activity scores where the amino acid classes are collapsed
+clustering_data<-vkor_variants[vkor_variants$position %in% active_site_positions,] %>%
+  group_by(position)
+clustering_data<-clustering_data[clustering_data$end!="X",]
+groupColumns=c("position","mut_class")
+class_clustering_data<-ddply(clustering_data, groupColumns, function(X) data.frame(class_avg=mean(X$activity_score, na.rm = TRUE)))
+
+#recast so that first column is position and then subsequent columns are scores with each AA class
+class_clustering_data$position<-factor(class_clustering_data$position)
+colnames(class_clustering_data)[3] <- "activity_score"
+#use spread from tidy r to cast from long form to wide form
+class_clustering_data_wide<-spread(class_clustering_data, mut_class, activity_score)
+class_clustering_data_wide<-as.data.frame(class_clustering_data_wide)
+row.names(class_clustering_data_wide)<-class_clustering_data_wide$position
+class_clustering_data_wide<-class_clustering_data_wide[,2:7]
+class_clustering_data$mut_class<-factor(class_clustering_data$mut_class,levels=sort(c("Charged","Aliphatic uncharged","Aromatic","Proline","Hydrophilic uncharged","Nonpolar uncharged")))
+
+#need to figure out which positions have data missing
+class_vector <- rep(c("Charged","Aliphatic uncharged","Aromatic","Proline","Hydrophilic uncharged","Nonpolar uncharged"),15)
+class_full_combinations <- crossing(active_site_positions,class_vector)
+colnames(class_full_combinations)<-c("position","mut_class")
+class_full_combinations$class_variant <- paste(class_full_combinations$position,class_full_combinations$mut_class,sep="")
+class_clustering_data$class_variant <- paste(class_clustering_data$position,class_clustering_data$mut_class,sep="")
+class_clustering_data<-class_clustering_data[class_clustering_data$activity_score != "NaN",]
+class_missing_combinations <- class_full_combinations[!(class_full_combinations$class_variant %in% class_clustering_data$class_variant),]
+
+active_site_activity_heatmap<- ggplot() +
+  geom_tile(data = class_missing_combinations, aes(x = factor(position), y = mut_class), fill = "grey70") +
+  geom_tile(data = subset(class_clustering_data, activity_score > vkor_lower_bound_activity & activity_score < vkor_upper_bound_activity), aes(x = factor(position), y = mut_class, fill = activity_score)) +
+  geom_tile(data = subset(class_clustering_data, activity_score >= vkor_upper_bound_activity), aes(x = factor(position), y = mut_class, fill = activity_score)) +
+  geom_tile(data = subset(class_clustering_data, activity_score <= vkor_lower_bound_activity), aes(x = factor(position), y = mut_class), fill = "blue") +scale_x_discrete(limits=as.character(active_site_positions))+ scale_y_discrete(limits = (rev(sort(unique(class_clustering_data$mut_class))))) +
+  scale_fill_gradientn(colours = c("blue","white","red"), values = rescale(c(vkor_lower_bound_activity,vkor_upper_bound_activity,2)), limits=c(vkor_lower_bound_activity,2), name = "Activity score") + xlab("Position")+
+  theme(axis.text.x=element_text(size=8,colour="black",angle=-90),
+        axis.text.y=element_text(size=8,colour="black"),
+        panel.background = element_rect(fill = "white"), 
+        panel.grid.major = element_line(colour = "grey90"),
+        legend.text = element_text(size=8),
+        legend.title = element_text(size=8),
+        axis.title.x = element_text(size=8),
+        axis.title.y = element_blank(),
+        legend.position = "top")+labs(fill = "Abundance score")
+plot(active_site_activity_heatmap)
+ggsave("Output/active_site_activity_heatmap.pdf", active_site_activity_heatmap,height = 3, width = 3)
+```
+
+#### Figure 5b: Active site definition analysis
+```{r}
+# Make a new vector for active site positions identified in Czogalla et al. paper (https://www.nature.com/articles/nsmb.3338)
+czogalla_active_site_positions<-c(30,55,59,78,80,84,87,88,90,112,113,116,120,123,124,128)
+
+#what is intersection of data active site and czogalla active site
+pymol_overlap_active_site_positions<-intersect(active_site_positions,czogalla_active_site_positions)
+vkor_data_unique_active_site<-active_site_positions[!(active_site_positions %in% pymol_overlap_active_site_positions)]
+czogalla_data_unique_active_site<-czogalla_active_site_positions[!(czogalla_active_site_positions %in% pymol_overlap_active_site_positions)]
+
+# Make a new vector for unique active site positions from my data
+pymol_vkor_active_site <- c()
+# Make a command that creates a new object of only the unique active site positions from my data
+pymol_vkor_active_site <- append(pymol_vkor_active_site, paste("create active_site, vkor and resi ",gsub(", ","+",toString(active_site_positions)),"", sep= ""))
+pymol_vkor_active_site <- append(pymol_vkor_active_site, paste("create cysteines, vkor and resi ",gsub(", ","+",toString(c("132","135"))),"", sep= ""))
+# Represent active site with magenta orange spheres, cysteines as aqua
+pymol_vkor_active_site <- append(pymol_vkor_active_site, c("show spheres, active_site","color magenta, active_site","set sphere_transparency=0.2, active_site","orient vkor"))
+pymol_vkor_active_site <- append(pymol_vkor_active_site, c("show spheres, cysteines","color greencyan, cysteines","set sphere_transparency=0.2, cysteines","orient vkor"))
+
+pymol_czogalla_active_site <- c()
+# Make a command that creates a new object of only the active site positions from the Czogalla et al. paper
+pymol_czogalla_active_site <- append(pymol_czogalla_active_site, paste("create czogalla_active_site, vkor and resi ",gsub(", ","+",toString(czogalla_data_unique_active_site)),"", sep= ""))
+# Represent active site with yellow orange spheres
+pymol_czogalla_active_site <- append(pymol_czogalla_active_site, c("show spheres, czogalla_active_site","color yelloworange, czogalla_active_site","set sphere_transparency=0.2, czogalla_active_site","orient vkor"))
+
+fileConn<-file("Output/pymol_czogalla_active_site.pml")
+writeLines(c(pymol_czogalla_active_site,pymol_vkor_standard_view,
+ paste("png ",markdown_directory,"/plots/pymol_czogalla_active_site.png, height= 7cm, width=7cm, dpi=300, ray=1",sep="")
+ ), fileConn)
+close(fileConn)
+
+fileConn<-file("Output/pymol_vkor_data_active_site.pml")
+writeLines(c(pymol_vkor_active_site,pymol_vkor_standard_view,
+ paste("png ",markdown_directory,"/plots/pymol_vkor_data_active_site.png, height= 16cm, width=16cm, dpi=300, ray=1",sep="")
+ ), fileConn)
+close(fileConn)
+```
+
+#### Figure 5c: Zoomed in active site with two alternate views
+```{r}
+
+#hide residues 55-65 so you can see cysteines more clearly for first view
+# pymol_vkor_zoomin_view_1<-c("orient vkor","set_view (0.649258852,0.490363389,0.581377149,-0.537385225,0.836697400,-0.105592541,-0.538217247,-0.243861586,0.806743801,-0.000210064,-0.000124089,-97.850257874,68.515419006,72.530281067,57.014923096,-196.138122559,391.903015137,-20.000000000)")
+# pymol_vkor_zoomin_view_2<-c("orient vkor","set_view (-0.362280518,0.793299854,-0.489306092,0.327178210,0.599793792,0.730202436,0.872752786,0.104450509,-0.476838022,-0.000210064,-0.000124089,-97.850257874,68.515419006,72.530281067,   57.014923096,-196.138122559,391.903015137,-20.000000000 )")
+
+pymol_vkor_zoomin_view<-c("orient vkor","set_view (0.736129344,0.654963374,0.170693919,-0.676630080,0.718404412,    0.161448613,-0.016885519,-0.234344751,0.972007394,0.000016127,0.000047784,-64.231903076,65.288925171,69.705024719,59.814834595,49.754718781,78.692863464,-20.000000000)")
+
+
+active_site_zoomin_1<-c()
+active_site_zoomin_1 <- append(active_site_zoomin_1, paste("create active_site, vkor and resi ",gsub(", ","+",toString(active_site_positions)),"", sep= ""))
+active_site_zoomin_1 <- append(active_site_zoomin_1, paste("create cysteines, vkor and resi ",gsub(", ","+",toString(c("43","132","135"))),"", sep= ""))
+# Represent active site with magenta orange spheres, cysteines as aqua
+active_site_zoomin_1 <- append(active_site_zoomin_1, c("show spheres, active_site","color magenta, active_site","set sphere_transparency=0.2, active_site"))
+active_site_zoomin_1 <- append(active_site_zoomin_1, c("show spheres, cysteines","color greencyan, cysteines","set sphere_transparency=0.2, cysteines"))
+active_site_zoomin_1 <- append(active_site_zoomin_1, c("show sticks, active_site"))
+active_site_zoomin_1 <- append(active_site_zoomin_1, paste("hide everything, vkor and resi ",gsub(", ","+",toString(seq(57,65,1))),"", sep= ""))
+
+fileConn<-file("Output/pymol_vkor_data_active_site_zoomin_1.pml")
+writeLines(c(active_site_zoomin_1,pymol_vkor_zoomin_view,
+ paste("png ",markdown_directory,"/plots/pymol_vkor_data_active_site_zoomin_1.png, height=10 cm,width=16cm, dpi=300, ray=1",sep=""),"rotate y, 120",paste("png ",markdown_directory,"/plots/pymol_vkor_data_active_site_zoomin_2.png, height=10 cm,width=16cm, dpi=300, ray=1",sep="")
+ ), fileConn)
+close(fileConn)
+
+# fileConn<-file("Output/pymol_vkor_data_active_site_zoomin_2.pml")
+# writeLines(c(active_site_zoomin_1,pymol_vkor_zoomin_view_2,
+#  paste("png ",markdown_directory,"/plots/pymol_vkor_data_active_site_zoomin_2.png, height=10 cm, width=14cm, dpi=300, ray=1",sep="")
+#  ), fileConn)
+# close(fileConn)
+```
+
+#### Figure 5e: Cysteine at 51 has largest effect on abundance of functional cysteines
+```{r}
+vkor_cysteines<-vkor_variants[vkor_variants$position %in% c(16,85,96,43,51,132,135),]
+vkor_cysteines$position<-as.character(vkor_cysteines$position)
+vkor_cysteines$position <- factor(vkor_cysteines$position, levels = c("43","51","132","135","16","85","96"))
+vkor_cysteines_summarized<-ddply(vkor_cysteines,~position,summarise,mean_abundance=mean(abundance_score),se_abundance=sd(abundance_score)/sqrt(length(abundance_score)),mean_activity=mean(activity_score, na.rm = TRUE),se_activity=sd(activity_score, na.rm = TRUE)/sqrt(length(activity_score)))
+
+#Make a heatmap of cysteine abundance scores where the amino acid classes are collapsed
+clustering_data<-vkor_cysteines %>%
+  group_by(position)
+clustering_data<-clustering_data[clustering_data$end!="X",]
+groupColumns=c("position","mut_class")
+class_clustering_data<-ddply(clustering_data, groupColumns, function(X) data.frame(class_avg=mean(X$abundance_score)))
+
+#recast so that first column is position and then subsequent columns are scores with each AA class
+class_clustering_data$position<-factor(class_clustering_data$position)
+colnames(class_clustering_data)[3] <- "abundance_score"
+#use spread from tidy r to cast from long form to wide form
+class_clustering_data_wide<-spread(class_clustering_data, mut_class, abundance_score)
+class_clustering_data_wide<-as.data.frame(class_clustering_data_wide)
+row.names(class_clustering_data_wide)<-class_clustering_data_wide$position
+class_clustering_data_wide<-class_clustering_data_wide[,2:7]
+class_clustering_data$mut_class<-factor(class_clustering_data$mut_class,levels=sort(c("Charged","Aliphatic uncharged","Aromatic","Proline","Hydrophilic uncharged","Nonpolar uncharged")))
+
+#then build abundance heatmap with collapsed classes
+dend_order<-unique(class_clustering_data$position)
+cysteine_abundance_heatmap<- ggplot() +
+  geom_tile(data = subset(class_clustering_data, abundance_score > vkor_lower_bound_abundance & abundance_score < vkor_upper_bound_abundance), aes(x = factor(position), y = mut_class, fill = abundance_score)) +
+  geom_tile(data = subset(class_clustering_data, abundance_score >= vkor_upper_bound_abundance), aes(x = factor(position), y = mut_class, fill = abundance_score)) +
+  geom_tile(data = subset(class_clustering_data, abundance_score <= vkor_lower_bound_abundance), aes(x = factor(position), y = mut_class), fill = "blue") +
+  xlab(NULL) +scale_x_discrete(limits=dend_order,labels=dend_order)+ scale_y_discrete(limits = (rev(sort(unique(class_clustering_data$mut_class))))) +  ylab(NULL) +
+  scale_fill_gradientn(colours = c("blue","white","red"), values = rescale(c(vkor_lower_bound_abundance,vkor_upper_bound_abundance,2)), limits=c(vkor_lower_bound_abundance,2), name = "Abundance score") + 
+  theme(axis.text.x=element_text(size=8,angle=-90,colour=(c("black","black","seagreen2","seagreen2","black","black","black"))),
+        axis.text.y=element_text(size=8,colour="black"),
+        panel.background = element_rect(fill = "white"), 
+        panel.grid.major = element_line(colour = "grey90"),
+        legend.position="top",
+        legend.text = element_text(size=8),
+        legend.title = element_text(size=8))
+ggsave("Output/cysteine_abundance_heatmap.pdf", cysteine_abundance_heatmap,height = 3, width = 3)
+
+#Make a heatmap of cysteine activity scores where the amino acid classes are collapsed
+clustering_data<-vkor_cysteines %>%
+  group_by(position)
+clustering_data<-clustering_data[clustering_data$end!="X",]
+groupColumns=c("position","mut_class")
+class_clustering_data<-ddply(clustering_data, groupColumns, function(X) data.frame(class_avg=mean(X$activity_score, na.rm = TRUE)))
+
+#recast so that first column is position and then subsequent columns are scores with each AA class
+class_clustering_data$position<-factor(class_clustering_data$position)
+colnames(class_clustering_data)[3] <- "activity_score"
+#use spread from tidy r to cast from long form to wide form
+class_clustering_data_wide<-spread(class_clustering_data, mut_class, activity_score)
+class_clustering_data_wide<-as.data.frame(class_clustering_data_wide)
+row.names(class_clustering_data_wide)<-class_clustering_data_wide$position
+class_clustering_data_wide<-class_clustering_data_wide[,2:7]
+class_clustering_data$mut_class<-factor(class_clustering_data$mut_class,levels=sort(c("Charged","Aliphatic uncharged","Aromatic","Proline","Hydrophilic uncharged","Nonpolar uncharged")))
+
+#need to figure out which positions have data missing
+class_vector <- rep(c("Charged","Aliphatic uncharged","Aromatic","Proline","Hydrophilic uncharged","Nonpolar uncharged"),7)
+class_full_combinations <- as.data.frame(cbind(c(16,85,96,43,51,132,135),class_vector))
+colnames(class_full_combinations)<-c("position","mut_class")
+class_full_combinations$class_variant <- paste(class_full_combinations$position,class_full_combinations$mut_class,sep="")
+class_clustering_data$class_variant <- paste(class_clustering_data$position,class_clustering_data$mut_class,sep="")
+class_clustering_data<-class_clustering_data[class_clustering_data$activity_score != "NaN",]
+class_missing_combinations <- class_full_combinations[!(class_full_combinations$class_variant %in% class_clustering_data$class_variant),]
+
+#then build activity heatmap with collapsed classes
+dend_order<-unique(class_clustering_data$position)
+a <- ifelse(class_clustering_data$position%in% c(43,51,132,135), "seagreen2", "black")
+cysteine_activity_heatmap<- ggplot() +
+  geom_tile(data = class_missing_combinations, aes(x = factor(position), y = mut_class), fill = "grey70") +
+  geom_tile(data = subset(class_clustering_data, activity_score > vkor_lower_bound_activity & activity_score < vkor_upper_bound_activity), aes(x = factor(position), y = mut_class, fill = activity_score)) +
+  geom_tile(data = subset(class_clustering_data, activity_score >= vkor_upper_bound_activity), aes(x = factor(position), y = mut_class, fill = activity_score)) +
+  geom_tile(data = subset(class_clustering_data, activity_score <= vkor_lower_bound_activity), aes(x = factor(position), y = mut_class), fill = "blue") +
+  xlab(NULL) +scale_x_discrete(limits=dend_order,labels=dend_order)+ scale_y_discrete(limits = (rev(sort(unique(class_clustering_data$mut_class))))) +  ylab(NULL) +
+  scale_fill_gradientn(colours = c("blue","white","red"), values = rescale(c(vkor_lower_bound_activity,vkor_upper_bound_activity,2)), limits=c(vkor_lower_bound_activity,2), name = "Activity score") + 
+  theme(axis.text.x=element_text(size=8,angle=-90,colour=(c("black","black","seagreen2","seagreen2","black","black","black"))),
+        axis.text.y=element_text(size=8,colour="black"),
+        panel.background = element_rect(fill = "white"), 
+        panel.grid.major = element_line(colour = "grey90"),
+        legend.position = "top",
+        legend.text = element_text(size=8),
+        legend.title = element_text(size=8))
+plot(cysteine_activity_heatmap)
+ggsave("Output/cysteine_activity_heatmap.pdf", cysteine_activity_heatmap,height = 3, width = 3)
+
+```
+
+#### Figure 6a: Warfarin resistance variants
+```{r Warfarin response variants analysis}
+wr_list<-c("W5X","A26P","A26T","L27V","H28Q","V29L","A34P","D36G","D36Y","A41S","V45A","S52L","S52W","V54L","S56F","R58G","W59R","W59C","W59L","V66G","V66M","H68Y","G71A","N77S","N77Y","I123N","L128R","Y139H")
+
+
+wr_classifications<-subset(vkor_variants[vkor_variants$variant %in% wr_list,],select=c("variant","abundance_score","abundance_se","abundance_class","activity_score","activity_se","activity_class"))
+
+```
+
+
+#### Figure 6: Human variants analysis
+```{r}
+#Import human variant data
+combined_human_var_dataset<-read.csv("supp_table_human_variants_abundance_and_activity_scores.csv",header=TRUE)
+```
+
+####Figure 6a: Human variants Venn diagram
+```{r Generate Venn diagram of all human variants and sources}
+
+human_variant_venn<-venn.diagram(
+    x = list(
+		gnomAD = c(unique(combined_human_var_dataset[combined_human_var_dataset$dataset=="gnomad","variant"])),
+		ClinVar = c(unique(combined_human_var_dataset[combined_human_var_dataset$dataset=="clinvar","variant"])),
+		Color = c(unique(combined_human_var_dataset[combined_human_var_dataset$dataset=="color_genomics","variant"])),
+		WR = c(wr_list)
+		),
+	filename = NULL,
+	col = "black",
+	lty = "solid",
+	lwd = 2,
+	fill = c("cornflowerblue", "green", "yellow", "darkorchid1"),
+	alpha = 0.50,
+	label.col = c("orange", "white", "darkorchid4", "white", "white", "white", "white", "white", "darkblue", "white", "white", "white", "white", "darkgreen", "white"),
+	cex = 1,
+	fontfamily = "sans",
+	fontface = "bold",
+	cat.col = c("darkblue", "darkgreen", "orange", "darkorchid4"),
+	cat.cex = 1,
+	cat.fontfamily = "sans"
+	);
+ggsave("Output/vkor_human_variants_venn.pdf", human_variant_venn,height = 3, width = 3)
+
+```
+
+####Figure 6b: Abundance class histogram by class of variant
+```{r}
+human_variants_class_abundance_histogram<-ggplot(data=subset(combined_human_var_dataset, abundance_class != "unknown"))+
+  geom_histogram(stat="count",aes(x=abundance_class,fill=class))+
+  scale_x_discrete(limits=c("low","possibly_low","possibly_wt-like","wt-like","high"),labels=c("Low","Possibly low","Possibly WT-like","WT-like","High"))+
+  scale_fill_manual(values=c("grey70", "#3366ff","#FF0000"),name = "Variant type",labels=c("Missense","Nonsense","Synonymous"))+
+  theme(legend.justification = c(0.02, 0.98), 
+        legend.position = c(0.02, 0.98), 
+        legend.title = element_text(size=12),
+        legend.text = element_text(size=10),
+        legend.background = element_rect(colour = 'black', fill = 'white', linetype='solid'),
+        axis.text.x=element_text(size=10,angle=45,color="black",hjust = 1),
+        axis.text.y=element_text(size=10,color="black"),
+        legend.key.size = unit(0.3, "cm"),
+        axis.title=element_text(size=12,color="black"))+
+  xlab("Abundance class")+
+  ylab("Variant count")
+plot(human_variants_class_abundance_histogram)
+ggsave(file="Output/human_variants_class_abundance_histogram.pdf",human_variants_class_abundance_histogram,height = 3.5, width = 4)
+
+```
+
+####Figure 6c: Abundance class histogram of human variants
+```{r}
+#make a figure showing all variants from these databases broken out by class and colored by database
+custom_colorscale <- c("low" = "#3366ff","possibly_low" = "#b3d9ff","possibly_wt-like" = "#ffcccc","wt-like" = "#F8766D","high" = "brown")
+
+combined_human_variants_abundance_histogram<-ggplot(data=subset(combined_human_var_dataset, abundance_class != "unknown"))+
+  geom_histogram(stat="count",aes(x=abundance_class,fill=literature_WR_variant))+
+  scale_x_discrete(limits=c("low","possibly_low","possibly_wt-like","wt-like","high"),labels=c("Low","Possibly low","Possibly WT-like","WT-like","High"))+
+  scale_fill_manual(values=c("#E69F00", "#56B4E9"),name = "Pathogenic variant",labels=c("No","Yes: R98W"))+
+  theme(legend.justification = c(0.02, 0.98), 
+        legend.position = c(0.02, 0.98), 
+        legend.title = element_text(size=12),
+        legend.text = element_text(size=10),
+        legend.background = element_rect(colour = 'black', fill = 'white', linetype='solid'),
+        axis.text.x=element_text(size=10,angle=45,color="black",hjust = 1),
+        axis.text.y=element_text(size=10,color="black"),
+        legend.key.size = unit(0.3, "cm"),
+        axis.title=element_text(size=12,color="black"))+
+  xlab("Abundance class")+
+  ylab("Variant count")
+plot(combined_human_variants_abundance_histogram)
+ggsave(file="Output/combined_human_variants_histogram_abundance.pdf",combined_human_variants_abundance_histogram,height = 3.5, width = 4)
+```
+
+
+####Figure 6c: Plot of warfarin resistance variants abundance scores
+```{r}
+wr_classifications$abundance_class<-factor(wr_classifications$abundance_class,levels=c("high","wt-like","possibly_wt-like","possibly_low","low"))
+
+#point plot of wr variants abundance scores
+wr_point_with_errobars_plot_abundance<-ggplot(wr_classifications, aes(x=reorder(variant, abundance_score),y=abundance_score))+ 
+  geom_errorbar(aes(colour=abundance_class,ymin=abundance_score-abundance_se,ymax=abundance_score+abundance_se))+
+  geom_point(shape = 21,colour="#000000",fill="#FFFFFF",size=2)+
+  theme(axis.text.x=element_text(size=10,angle=90,color="black",hjust=0),
+    axis.text.y=element_text(size=10,color="black"),
+    panel.background = element_rect(fill = "white"),
+    legend.title = element_text(size=10),
+    legend.text = element_text(size=8),
+    legend.justification = c(0.98,0.02), 
+    legend.position = c(0.98, 0.02), 
+    legend.background = element_rect(colour = 'black', fill = 'white', linetype='solid'),
+    legend.key.size = unit(0.11, "cm"),
+    axis.title=element_text(size=12,color="black"))+ 
+  scale_color_manual(values=c("#FF0000","#FF9595","#D4D1FD","#938CFF","#0F00FC"),name = "Abundance class",labels=c("High","WT-like","Possibly WT-like","Possibly low","Low"))+
+  xlab("Variant")+
+  ylab("Abundance score")
+plot(wr_point_with_errobars_plot_abundance)
+ggsave(file="Output/wr_variants_abundance_score_dot_plot.pdf",wr_point_with_errobars_plot_abundance,height = 3.5, width = 4)
+
+ks.test(vkor_variants$abundance_score, wr_classifications$abundance_score)
+
+```
+
+
+#### Figure 1--figure supplement 2: correlations between replicates for abundance
+```{r Replicate score correlations on, warning = FALSE}
+scatterplot_correlation_fxn <- function(data, mapping, ...){
+p <- ggplot(data = data, mapping = mapping) + 
+geom_point(alpha = 0.01)+ theme(axis.text.x = element_text(size=10,angle=-90,hjust=0.95))
+p
+}
+
+vkor_variants_min <- vkor_variants[,c("class","abundance_score1","abundance_score2","abundance_score3","abundance_score4","abundance_score5","abundance_score6","abundance_score7")]
+
+## experiment correlations
+vkor_pearson_cor_matrix <- as.matrix(cor(vkor_variants_min[,c("abundance_score1","abundance_score2","abundance_score3","abundance_score4","abundance_score5","abundance_score6","abundance_score7")], use="pairwise.complete.obs", method = "pearson"))
+paste("Average VKOR replicate correlation Pearson's r:",round(mean(vkor_pearson_cor_matrix[-seq(1,nrow(vkor_pearson_cor_matrix)^2,nrow(vkor_pearson_cor_matrix)+1)]),2))
+
+vkor_spearman_cor_matrix <- as.matrix(cor(vkor_variants_min[,c("abundance_score1","abundance_score2","abundance_score3","abundance_score4","abundance_score5","abundance_score6","abundance_score7")], use="pairwise.complete.obs", method = "spearman"))
+paste("Average VKOR replicate correlation Spearman's r:",round(mean(vkor_spearman_cor_matrix[-seq(1,nrow(vkor_spearman_cor_matrix)^2,nrow(vkor_spearman_cor_matrix)+1)]),2))
+
+vkor_scatterplot_matrix_pearson <- ggpairs(vkor_variants_min,columns = c("abundance_score1","abundance_score2","abundance_score3","abundance_score4","abundance_score5","abundance_score6","abundance_score7"), lower = list(continuous = scatterplot_correlation_fxn), upper=list(continuous = wrap("cor", size = 4, color="black")),method = "pearson"+theme(panel.grid.major = element_blank(), panel.grid.minor = element_blank(),panel.background = element_blank(), axis.line = element_line(colour = "black")))+theme(axis.text.x=element_text(size=10,angle=-90,hjust=0.95),axis.text.y = element_text(size=10))
+ggsave(file = "Output/vkor_scatterplot_matrix_pearson_abundance.pdf", plot = vkor_scatterplot_matrix_pearson, height = 4, width = 4)
+```
+
+#### Figure 2--figure supplement 2: correlations between replicates for activity
+```{r Replicate score correlations on, warning = FALSE}
+scatterplot_correlation_fxn <- function(data, mapping, ...){
+p <- ggplot(data = data, mapping = mapping) + 
+geom_point(alpha = 0.1) + theme(axis.text.x = element_text(size=10,angle=-90,hjust=0.95))
+p
+}
+
+vkor_variants_min <- vkor_variants[,c("class","activity_score4","activity_score5","activity_score6","activity_score7","activity_score8","activity_score9")]
+
+## experiment correlations
+vkor_pearson_cor_matrix <- as.matrix(cor(vkor_variants_min[,c("activity_score4","activity_score5","activity_score6","activity_score7","activity_score8","activity_score9")], use="pairwise.complete.obs", method = "pearson"))
+paste("Average VKOR replicate correlation Pearson's r:",round(mean(vkor_pearson_cor_matrix[-seq(1,nrow(vkor_pearson_cor_matrix)^2,nrow(vkor_pearson_cor_matrix)+1)]),2))
+
+vkor_spearman_cor_matrix <- as.matrix(cor(vkor_variants_min[,c("activity_score4","activity_score5","activity_score6","activity_score7","activity_score8","activity_score9")], use="pairwise.complete.obs", method = "spearman"))
+paste("Average VKOR replicate correlation Spearman's r:",round(mean(vkor_spearman_cor_matrix[-seq(1,nrow(vkor_spearman_cor_matrix)^2,nrow(vkor_spearman_cor_matrix)+1)]),2))
+
+vkor_scatterplot_matrix_pearson <- ggpairs(vkor_variants_min,columns = c("activity_score4","activity_score5","activity_score6","activity_score7","activity_score8","activity_score9"), lower = list(continuous = scatterplot_correlation_fxn),upper=list(continuous = wrap("cor", size = 4, color="black")), method = "pearson"+theme(panel.grid.major = element_blank(),panel.grid.minor = element_blank()))+theme(axis.text.x=element_text(size=10,angle=-90,hjust=0.95),axis.text.y = element_text(size=10))
+ggsave(file = "Output/vkor_scatterplot_matrix_pearson_activity.pdf", plot = vkor_scatterplot_matrix_pearson, height = 4, width =4)
+```
+
+
+#### Figure 3--figure supplement 1: pymol script to overlay bacterial structure with EVcouplings folded VKOR model
+```{r}
+# Create a vector of commands common to all pymol scripting I'll be doing
+pymol_setup <- c()
+# Import the PDB and do initial setup steps
+pymol_setup <- append(pymol_setup, c("reinitialize","fetch 4NV5","bg_color white","set opaque_background, 0","hide all","set ray_trace_mode, 1"))
+# Create individual objects for vkor and the substrate
+pymol_setup <- append(pymol_setup, c("create bacterial_vkor, chain A and resi 16-150 and not resn HOH","delete 4NV5","color grey70, bacterial_vkor","show cartoon, bacterial_vkor","orient bacterial_vkor","set cartoon_gap_cutoff, 0"))
+#load EVcouplings folded VKOR and align
+pymol_setup <- append(pymol_setup, c("load evcouplings_model.cif","color forest, evcouplings","align bacterial_vkor, evcouplings"))
+# Set the view to a common useful orientation
+pymol_vkor_standard_view<-c("orient bacterial_vkor","set_view (0.015495982,-0.900648355,-0.434266955,0.854856908,0.237211853,-0.461461723,0.518630743,-0.364085436,0.773603559,0.000000000,0.000000000, -178.687484741,0.031576157,-0.094556808,0.089496613,140.878570557,216.496398926,-20.000000000 )")
+
+fileConn<-file("Output/EV_couplings_bacterial_vkor_align.pml")
+writeLines(c(pymol_setup,pymol_vkor_standard_view,
+ paste("png ",markdown_directory,"/plots/EV_couplings_bacterial_vkor_align_view1.png, height=10 cm,width=16cm, dpi=300, ray=1",sep=""),"rotate y, 120",paste("png ",markdown_directory,"/plots/EV_couplings_bacterial_vkor_align_view2.png, height=10 cm,width=16cm, dpi=300, ray=1",sep="")
+ ), fileConn)
+close(fileConn)
+```
+
+#### Figure 3--figure supplement 2: facet grid histograms by specific domain
+```{r}
+#Histogram of VKOR missense variants colored by specific domain in protein
+vkor_score_by_specific_domain_histogram<-ggplot(missense_variants,aes(x=abundance_score))+geom_histogram(bins=50,aes(fill=domain))+ theme(panel.grid.major = element_blank(), panel.grid.minor = element_blank(),panel.background = element_blank(),legend.position = "none",axis.text = element_text(size=8,colour="black"),axis.title = element_text(size=10,colour="black"))+facet_wrap(~specific_domain)+xlab("Abundance score")+ylab("Variant count")
+print(vkor_score_by_specific_domain_histogram)
+ggsave(file="Output/vkor_missense_vars_histogram_by_specific_domain_facet_wrap.pdf",vkor_score_by_specific_domain_histogram, height=3, width = 4)
+
+```
+
+#### Figure 4--figure supplement 1: Show increased abundance variants (arginine and lysine analysis)
+```{r}
+RK_variants<-vkor_variants[vkor_variants$start %in% c("R","K"),]
+#positions: 152 159 161  30 100  12 151 162  33  35  37  40  53  58  61  98
+#want to compare abundance patterns for 30, 33, 35, 37 to rest of residues
+#cytoplasmic: 12, 98,100,151,152,159,161,162
+#ER lumenal:40,53,58,61
+
+RK_order<-as.character(c(30,33,35,37,40,53,58,61,12,98,100,151,152,159,161,162))
+
+wtseq <- "MGSTWGSPGWVRLALCLTGLVLSLYALHVKAARARDRDYRALCDVGTAISCSRVFSSRWGRGFGLVEHVLGQDSILNQSNSIFGCIFYTLQLLLGCLRTRWASVLMLLSSLVSLAGSVYLAWILFFVLYDFCIVCITTYAINVSLMWLSFRKVQEPQGKAKRH"
+wtseqframe <- data.frame(seq(1,nchar(wtseq)))
+wtseqframe$end <- rep("NA",nchar(wtseq))
+for (x in 1:nchar(wtseq)){wtseqframe$end[x] <- substr(wtseq,x,x)}
+wtseqframe$abundance_score <- vkor_variants[vkor_variants$class == "wt","abundance_score"]
+colnames(wtseqframe) <- c("position","end","abundance_score")
+
+position_vector <- seq(1:nchar(wtseq))
+aa_vector <- c("A","V","I","L","M","F","Y","W","S","T","N","Q","C","G","P","R","H","K","D","E","X")
+full_combinations <- as.vector(outer(position_vector, aa_vector, paste, sep=""))
+missing_combinations <- data.frame(full_combinations[!(full_combinations %in% substr(subset(vkor_variants, !is.na(abundance_score))$variant,2,10))]); colnames(missing_combinations) <- "variant"
+missing_combinations$position <- gsub("[^0-9]","",missing_combinations$variant); missing_combinations$position <- as.numeric(missing_combinations$position)
+missing_combinations$end <- gsub("[0-9]","",missing_combinations$variant); missing_combinations$end <- factor(missing_combinations$end, levels = c("A","V","I","L","M","F","Y","W","S","T","N","Q","C","G","P","R","H","K","D","E","X"))
+
+RK_full_variant_heatmap <- ggplot() +
+geom_tile(data = subset(missing_combinations,position %in% RK_order), aes(x = factor(position), y = end), fill = "grey70") +
+geom_tile(data = subset(vkor_variants, position %in% RK_order & (class == "missense" | class == "nonsense") & abundance_score > vkor_lower_bound_abundance & abundance_score < vkor_upper_bound_abundance), aes(x = factor(position), y = end, fill = abundance_score)) +
+geom_tile(data = subset(vkor_variants, position %in% RK_order & (class == "missense" | class == "nonsense") & abundance_score >= vkor_upper_bound_abundance), aes(x = factor(position), y = end, fill = abundance_score)) +
+geom_tile(data = subset(vkor_variants, position %in% RK_order & (class == "missense" | class == "nonsense") & abundance_score <= vkor_lower_bound_abundance), aes(x = factor(position), y = end), fill = "blue") +
+geom_tile(data = subset(wtseqframe, position %in% RK_order), aes(x = factor(position), y= end, fill = abundance_score)) +
+geom_point(data = subset(wtseqframe, position %in% RK_order), aes(x = factor(position), y = end), shape = 15, size = 0.4) +
+xlab(NULL) +scale_x_discrete(limits=RK_order,labels=RK_order)+ scale_y_discrete(limits = unique(rev(missing_combinations$end))) +ylab(NULL) +
+scale_fill_gradientn(colours = c("blue","white","red"), values = rescale(c(vkor_lower_bound_abundance,vkor_upper_bound_abundance,2)), limits=c(vkor_lower_bound_abundance,2)) + 
+theme(panel.background = element_rect(fill = "white"),
+panel.grid.major = element_line(colour = "grey90"))+xlab("Position")+ylab("Amino acid")+
+  theme(panel.background = element_rect(fill = "white"),
+        panel.grid.major = element_line(colour = "grey90"),
+        axis.text.x =element_text(size=10,color="black",angle=90, hjust=0.95, vjust=0.5),
+        axis.text.y=element_text(size=10,color="black"),
+        axis.title=element_text(size=12,color="black"),
+        legend.title = element_text(size=12),
+        legend.text = element_text(size=10),
+        legend.position = "top")+ labs(fill = "Abundance score")
+plot(RK_full_variant_heatmap)
+ggsave(file = "Output/RK_full_variant_abundance_heatmap.pdf", RK_full_variant_heatmap, height = 4, width = 3)
+```
+
+#### Figure 4--figure supplement 2: Comparing VKOR trimodal abundance score distribution to PTEN and TPMT
+```{r}
+pten_variants<-read.table("PTEN.tsv",sep="\t",header=TRUE)
+tpmt_variants<-read.table("TPMT.tsv",sep="\t",header=TRUE)
+
+#missense histogram comparison between VKOR, TPMT, and PTEN
+missense_variants$protein<-"vkor"
+pten_variants$protein<-"pten"
+tpmt_variants$protein<-"tpmt"
+
+#what columns do we want to put into 
+vkor_variants_to_combine <- missense_variants[,c("variant","class","abundance_class","end","abundance_score","abundance_se","protein")]
+colnames(vkor_variants_to_combine)<-c("variant","class","abundance_class","end","score","se","protein")
+pten_variants_to_combine<-pten_variants[,c("variant","class","abundance_class","end","score","se","protein")]
+tpmt_variants_to_combine<-tpmt_variants[,c("variant","class","abundance_class","end","score","se","protein")]
+
+all_variants_combined<-rbind(vkor_variants_to_combine,pten_variants_to_combine)
+all_variants_combined<-rbind(all_variants_combined,tpmt_variants_to_combine)
+
+combined_histogram_plot <- ggplot() + geom_histogram(data = subset(all_variants_combined, class == "missense" & !is.na(score)), aes(x = score)) +facet_grid(protein ~ .)+theme(axis.text=element_text(size=10,colour="black"),axis.title=element_text(size=12,colour="black"),strip.text = element_blank())+xlab("Abundance score")+ ylab("Variant count")
+plot(combined_histogram_plot)
+ggsave(file="Output/missense_vars_histogram_pten_tpmt_vkor_combined.pdf",combined_histogram_plot, height = 3, width = 3)
+```
+
+
+#### Figure 5--figure supplement 3: Localization motif comparison
+```{r fig.height=2,fig.width=8,echo=FALSE}
+diarginine_order<-as.character(c(97,98,99,100,101,102))
+
+wtseq <- "MGSTWGSPGWVRLALCLTGLVLSLYALHVKAARARDRDYRALCDVGTAISCSRVFSSRWGRGFGLVEHVLGQDSILNQSNSIFGCIFYTLQLLLGCLRTRWASVLMLLSSLVSLAGSVYLAWILFFVLYDFCIVCITTYAINVSLMWLSFRKVQEPQGKAKRH"
+wtseqframe <- data.frame(seq(1,nchar(wtseq)))
+wtseqframe$end <- rep("NA",nchar(wtseq))
+for (x in 1:nchar(wtseq)){wtseqframe$end[x] <- substr(wtseq,x,x)}
+wtseqframe$abundance_score <- vkor_variants[vkor_variants$class == "wt","abundance_score"]
+colnames(wtseqframe) <- c("position","end","abundance_score")
+
+diarginine_full_variant_heatmap <- ggplot() +
+geom_tile(data = subset(missing_combinations,position %in% diarginine_order), aes(x = factor(position), y = end), fill = "grey70") +
+geom_tile(data = subset(vkor_variants, position %in% diarginine_order & (class == "missense" | class == "nonsense") & abundance_score > vkor_lower_bound_abundance & abundance_score < vkor_upper_bound_abundance), aes(x = factor(position), y = end, fill = abundance_score)) +
+geom_tile(data = subset(vkor_variants, position %in% diarginine_order & (class == "missense" | class == "nonsense") & abundance_score >= vkor_upper_bound_abundance), aes(x = factor(position), y = end, fill = abundance_score)) +
+geom_tile(data = subset(vkor_variants, position %in% diarginine_order & (class == "missense" | class == "nonsense") & abundance_score <= vkor_lower_bound_abundance), aes(x = factor(position), y = end), fill = "blue") +
+geom_tile(data = subset(wtseqframe, position %in% diarginine_order), aes(x = factor(position), y= end, fill = abundance_score)) +
+geom_point(data = subset(wtseqframe, position %in% diarginine_order), aes(x = factor(position), y = end), shape = 15, size = 0.4) +
+xlab(NULL) +scale_x_discrete(limits=diarginine_order,labels=c("97\nL","98\nR","99\nT","100\nR","101\nW","102\nA"))+ scale_y_discrete(limits = unique(rev(missing_combinations$end))) +ylab(NULL) +
+scale_fill_gradientn(colours = c("blue","white","red"), values = rescale(c(vkor_lower_bound_abundance,vkor_upper_bound_abundance,2)), limits=c(vkor_lower_bound_abundance,2)) + 
+theme(panel.background = element_rect(fill = "white"),
+panel.grid.major = element_line(colour = "grey90"))+xlab("Position")+ylab("Amino acid")+
+  theme(panel.background = element_rect(fill = "white"),
+        panel.grid.major = element_line(colour = "grey90"),
+        axis.text.x =element_text(size=10,color="black", hjust=0.5),
+        axis.text.y=element_text(size=10,color="black"),
+        axis.title=element_text(size=12,color="black"),
+        legend.title = element_text(size=12),
+        legend.text = element_text(size=10))+ labs(fill = "Abundance score")
+plot(diarginine_full_variant_heatmap)
+ggsave(file = "Output/diarginine_full_variant_abundance_heatmap.pdf", diarginine_full_variant_heatmap, height = 3, width = 3)
+
+dilysine_order<-as.character(c(158,159,160,161,162,163))
+
+dilysine_full_variant_heatmap <- ggplot() +
+geom_tile(data = subset(missing_combinations,position %in% dilysine_order), aes(x = factor(position), y = end), fill = "grey70") +
+geom_tile(data = subset(vkor_variants, position %in% dilysine_order & (class == "missense" | class == "nonsense") & abundance_score > vkor_lower_bound_abundance & abundance_score < vkor_upper_bound_abundance), aes(x = factor(position), y = end, fill = abundance_score)) +
+geom_tile(data = subset(vkor_variants, position %in% dilysine_order & (class == "missense" | class == "nonsense") & abundance_score >= vkor_upper_bound_abundance), aes(x = factor(position), y = end, fill = abundance_score)) +
+geom_tile(data = subset(vkor_variants, position %in% dilysine_order & (class == "missense" | class == "nonsense") & abundance_score <= vkor_lower_bound_abundance), aes(x = factor(position), y = end), fill = "blue") +
+geom_tile(data = subset(wtseqframe, position %in% dilysine_order), aes(x = factor(position), y= end, fill = abundance_score)) +
+geom_point(data = subset(wtseqframe, position %in% dilysine_order), aes(x = factor(position), y = end), shape = 15, size = 0.4) +
+xlab(NULL) +scale_x_discrete(limits=dilysine_order,labels=c("158\nG","159\nK","160\nA","161\nK","162\nR","163\nH"))+ scale_y_discrete(limits = unique(rev(missing_combinations$end))) +ylab(NULL) +
+scale_fill_gradientn(colours = c("blue","white","red"), values = rescale(c(vkor_lower_bound_abundance,vkor_upper_bound_abundance,2)), limits=c(vkor_lower_bound_abundance,2)) + 
+theme(panel.background = element_rect(fill = "white"),
+panel.grid.major = element_line(colour = "grey90"))+xlab("Position")+ylab("Amino acid")+
+  theme(panel.background = element_rect(fill = "white"),
+        panel.grid.major = element_line(colour = "grey90"),
+        axis.text.x =element_text(size=10,color="black", hjust=0.5),
+        axis.text.y=element_text(size=10,color="black"),
+        axis.title=element_text(size=12,color="black"),
+        legend.title = element_text(size=12),
+        legend.text = element_text(size=10))+ labs(fill = "Abundance score")
+plot(dilysine_full_variant_heatmap)
+ggsave(file = "Output/dilysine_full_variant_abundance_heatmap.pdf", dilysine_full_variant_heatmap, height = 3, width = 3)
+
+dilysine_variants<-vkor_variants[vkor_variants$position %in% (c(158,159,160,161,162,163)),]
+
+wilcox.test(sample(dilysine_variants[dilysine_variants$position %in% (c(158,160)),"abundance_score"],40), dilysine_variants[dilysine_variants$position %in% (c(159,161)),"abundance_score"]) 
+
+diarginine_variants<-vkor_variants[vkor_variants$position %in% (c(97,98,99,100,101,102)),]
+
+wilcox.test(sample(diarginine_variants[diarginine_variants$position %in% (c(99,101)),"abundance_score"],36), diarginine_variants[diarginine_variants$position %in% (c(98,100)),"abundance_score"]) 
+
+```
+
