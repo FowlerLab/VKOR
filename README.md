@@ -6,6 +6,7 @@ This repository houses the files needed to recreate the anaylses required for th
 2) "vkor_abundance_activity_scores_positions.csv"
 3) "TPMT.tsv"
 4) "PTEN.tsv"
+5) "human_variants_abundance_and_activity_scores.csv"
   
 Furthermore, create a directory titled "Output" in the same directory as this R Markdown file to create the graphics files used to generate the figures.
   
