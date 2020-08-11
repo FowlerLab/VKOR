@@ -2,10 +2,10 @@
   
 This repository houses the files needed to recreate the anaylses required for the manuscript "Multiplexed measurement of variant abundance and activity reveals VKOR topology, active site and human variant impact." The "VAMP-seq_analysis.Rmd" R Markdown file is intended to be run with R Studio. This R markdown file will go through the processes of analyzing the data for the VKOR manuscript, using 2 files as the starting point. These files are the VKOR variant abundance and activity score data tables, as well as the VKOR and TPMT positional score data tables. These files were provided as supplementary data files from the journal, and can also be obtained at our GitHub repo. Please place these files in the same directory as this R Markdown file to allow the analyses to proceed:
 
-1) "VKOR_variant_data.tsv"
-2) "VKOR_positional_data.tsv"
-3) "TPMT_variant_data.tsv"
-4) "PTEN_variant_data.tsv"
+1) "vkor_abundance_activity_scores_variants.csv"
+2) "vkor_abundance_activity_scores_positions.csv"
+3) "TPMT.tsv"
+4) "PTEN.tsv"
   
 Furthermore, create a directory titled "Output" in the same directory as this R Markdown file to create the graphics files used to generate the figures.
   
